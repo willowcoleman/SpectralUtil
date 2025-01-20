@@ -174,12 +174,16 @@ def open_envi(input_file, lazy=True):
     wl = np.array([float(x) for x in ds.metadata['wavelength']])
     fwhm = np.array([float(x) for x in ds.metadata['fwhm']])
     nodata_value = float(ds.metadata['data ignore value'])
-    meta = SpectralMetadata(wl, fwhm, nodata_value=nodata_value)
+    proj = ds.metadata['coordinate system string']
+    map_info = ds.metadata['map info'].split(',')
+    trans = [float(map_info[3]), float(map_info[5]), 0, float(map_info[4]), 0, -float(map_info[6])]
 
     if lazy:
         rfl = ds.open_memmap(interleave='bip', writable=False)
     else:
         rfl = ds.open_memmap(interleave='bip').copy()
+
+    meta = SpectralMetadata(wl, fwhm, nodata_value=nodata_value, geotransform=trans, projection=proj)
     
     return meta, rfl
     
