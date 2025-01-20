@@ -91,7 +91,8 @@ def nbr(input_file, output_file, ortho, nir_wl, swir_wl, nir_width, swir_width):
 @click.option('--green_wl', default=560, help='Green band wavelength [nm]')
 @click.option('--blue_wl', default=460, help='Blue band width [nm]')
 @click.option('--stretch', default=[2,98], nargs=2, type=int, help='stretch the rgb; set to -1 -1 to not stretch')
-def rgb(input_file, output_file, ortho, red_wl, green_wl, blue_wl, stretch):
+@click.option('--scale', default=[-1,-1,-1,-1,-1,-1], nargs=6, type=float, help='scale the rgb to these min, max pairs')
+def rgb(input_file, output_file, ortho, red_wl, green_wl, blue_wl, stretch, scale):
     """
     Calculate RGB composite.
 
@@ -103,7 +104,10 @@ def rgb(input_file, output_file, ortho, red_wl, green_wl, blue_wl, stretch):
         green_wl (int): Green band wavelength [nm].
         blue_wl (int): Blue band wavelength [nm].
         stretch [(int), (int)]: Stretch the RGB values to the percentile min & max listed here.  Set to -1, -1 to not stretch.
+        scale [(int), (int), (int), (int), (int), (int)]: Scale the RGB values to the min & max listed here.  Set to -1s to not scale (default).
     """
+    if np.all(np.array(scale) != -1) and np.all(np.array(stretch) != -1):
+        raise ValueError("Cannot set both stretch and scale")
 
     click.echo(f"Running RGB Calculation on {input_file}")
     meta, rfl = load_spectral(input_file, lazy=True, load_glt=ortho)
@@ -121,6 +125,17 @@ def rgb(input_file, output_file, ortho, red_wl, green_wl, blue_wl, stretch):
 
         rgb[rgb == 0] = 1
         rgb[mask,:] = 0
+        nodata_value = 0
+    elif np.all(np.array(scale) != -1):
+        mask = rgb[...,0] == meta.nodata_value
+        rgb[...,0] = (np.clip(rgb[...,0], scale[0], scale[1]) - scale[0]) / (scale[1] - scale[0])
+        rgb[...,1] = (np.clip(rgb[...,1], scale[2], scale[3]) - scale[2]) / (scale[3] - scale[2])
+        rgb[...,2] = (np.clip(rgb[...,2], scale[4], scale[5]) - scale[4]) / (scale[5] - scale[4])
+
+        rgb = (rgb * 255).astype(np.uint8)
+        rgb[rgb == 0] = 1
+        rgb[mask,:] = 0
+
         nodata_value = 0
     else:
         nodata_value = meta.nodata_value

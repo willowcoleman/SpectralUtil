@@ -3,6 +3,16 @@ import netCDF4 as nc
 import os
 import numpy as np
 
+numpy_to_gdal = {
+    np.dtype(np.float64): 7,
+    np.dtype(np.float32): 6,
+    np.dtype(np.int32): 5,
+    np.dtype(np.uint32): 4,
+    np.dtype(np.int16): 3,
+    np.dtype(np.uint16): 2,
+    np.dtype(np.uint8): 1,
+}
+
 class SpectralMetadata:
     def __init__(self, wavelengths, fwhm, geotransform=None, projection=None, glt=None, pre_orthod=False, nodata_value=None):
         """
@@ -75,18 +85,20 @@ def load_spectral(input_file, lazy=True, load_glt=False):
     else:
         raise ValueError(f'Unknown file type for {input_file}')
 
-def ortho_data(data, glt, glt_nodata=0):
+def ortho_data(data, glt, glt_nodata=0, nodata_value=-9999):
     """
     Orthorectifies the data using the provided ground control points.
 
     Args:
         data (numpy.ndarray): The spectral data to orthorectify, with shape (rows, cols, bands).
-        glt (numpy.ndarray): The ground control points, with shape (rows, cols, 2).
+        glt (numpy.ndarray, optional): 3d array of x and y indices. Defaults to None. Negatives assumed as interpolation values.
+        glt_nodata (int, optional): The nodata value for the glt. Defaults to 0.
+        nodata_value (int, optional): The nodata value to fill in the background with.
 
     Returns:
         numpy.ndarray: The orthorectified data.
     """
-    outdata = np.zeros((glt.shape[0], glt.shape[1], data.shape[2]), dtype=data.dtype)
+    outdata = np.zeros((glt.shape[0], glt.shape[1], data.shape[2]), dtype=data.dtype) + nodata_value
     valid_glt = np.all(glt != glt_nodata, axis=-1)
     if glt_nodata == 0:
         glt[valid_glt] -= 1
@@ -105,16 +117,17 @@ def write_cog(output_file, data, meta, ortho=True, nodata_value=-9999):
         meta (SpectralMetadata): The spectral metadata containing geotransform and projection information.
         ortho (bool, optional): Whether to ortho the data.  Only relevant if the data isn't natively orthod. Defaults to True.
         nodata_value (, optional): The nodata value to use. Defaults to -9999.
+        gdal_dtype (int, optional): The GDAL data type to use. Defaults to 6 (Float32).
     """
     from osgeo import gdal
     driver = gdal.GetDriverByName('MEM')
 
     if ortho and meta.orthoable:
-        od = ortho_data(data, meta.glt)
+        od = ortho_data(data, meta.glt, nodata_value=nodata_value)
     else:
         od = data
 
-    ds = driver.Create('', od.shape[1], od.shape[0], od.shape[2], gdal.GDT_Float32)
+    ds = driver.Create('', od.shape[1], od.shape[0], od.shape[2], numpy_to_gdal[od.dtype])
     if meta.geotransform is not None:
         ds.SetGeoTransform(meta.geotransform)
     if meta.projection is not None:
@@ -210,7 +223,7 @@ def open_emit_rdn(input_file, lazy=True, load_glt=False):
     fwhm = ds['sensor_band_parameters']['fwhm'][:]
     trans = ds.geotransform
     proj = ds.spatial_ref
-    nodata_value = ds['radiance']._FillValue
+    nodata_value = float(ds['radiance']._FillValue)
 
     if lazy:
         rdn = ds['radiance']
@@ -244,7 +257,7 @@ def open_av3_rfl(input_file, lazy=True):
     fwhm = ds['reflectance']['fwhm'][:]
     proj = ds.variables['transverse_mercator'].spatial_ref
     trans = [float(x) for x in ds.variables['transverse_mercator'].GeoTransform.split(' ')]
-    nodata_value = ds['reflectance']['reflectance']._FillValue
+    nodata_value = float(ds['reflectance']['reflectance']._FillValue)
 
     if lazy:
         # This is too bad....we're forced into inconsistent handling between AV3 and EMIT
