@@ -75,7 +75,7 @@ def nbr(input_file, output_file, ortho, nir_wl, swir_wl, nir_width, swir_width):
     nir = rfl[..., meta.wl_index(nir_wl)]
     swir = rfl[..., meta.wl_index(swir_wl)]
 
-    nbr = (swir - nir) / (swir + nir)
+    nbr = (nir - swir) / (swir + nir)
     nbr = nbr.squeeze().astype(np.float32)  
     nbr[nir == meta.nodata_value] = -9999
     nbr[np.isfinite(nbr) == False] = -9999
