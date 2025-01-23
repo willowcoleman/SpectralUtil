@@ -205,7 +205,11 @@ def open_netcdf(input_file, lazy=True, load_glt=False):
     if 'EMIT' in input_file and 'RAD' in input_file:
         return open_emit_rdn(input_file, lazy=lazy, load_glt=load_glt)
     elif 'AV3' in input_file and 'RFL' in input_file:
-        return open_av3_rfl(input_file, lazy=lazy)
+        return open_airborne_rfl(input_file, lazy=lazy)
+    elif ('ang' in input_file or 'ANG' in input_file) and 'RFL' in input_file:
+        return open_airborne_rfl(input_file, lazy=lazy)
+    else:
+        raise ValueError(f'Unknown file type for {input_file}')
 
 
 def open_emit_rdn(input_file, lazy=True, load_glt=False):
@@ -243,9 +247,9 @@ def open_emit_rdn(input_file, lazy=True, load_glt=False):
     return meta, rdn
 
 
-def open_av3_rfl(input_file, lazy=True):
+def open_airborne_rfl(input_file, lazy=True):
     """
-    Opens an EMIT radiance NetCDF file and extracts the spectral metadata and radiance data.
+    Opens an Airborne radiance NetCDF file and extracts the spectral metadata and radiance data.
 
     Args:
         input_file (str): Path to the NetCDF file.

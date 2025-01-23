@@ -44,6 +44,8 @@ def ndvi(input_file, output_file, ortho, red_wl, nir_wl, red_width, nir_width):
 
     ndvi = (nir - red) / (nir + red)
     ndvi = ndvi.squeeze()
+    ndvi[nir == meta.nodata_value] = -9999
+    ndvi[np.isfinite(ndvi) == False] = -9999
     ndvi = ndvi.reshape((ndvi.shape[0], ndvi.shape[1], 1))
 
     write_cog(output_file, ndvi, meta, ortho=ortho)
@@ -80,7 +82,6 @@ def nbr(input_file, output_file, ortho, nir_wl, swir_wl, nir_width, swir_width):
     nbr[nir == meta.nodata_value] = -9999
     nbr[np.isfinite(nbr) == False] = -9999
     nbr = nbr.reshape((nbr.shape[0], nbr.shape[1], 1))
-    print(np.sum(nbr != -9999))
 
     write_cog(output_file, nbr, meta, ortho=ortho, nodata_value=-9999)
 

@@ -7,6 +7,7 @@ specifics of the file delivery.  Currently, the package supports data from the f
 
 
 - [AVIRIS-3 L2A Reflectance](https://daac.ornl.gov/cgi-bin/dsviewer.pl?ds_id=2357)
+- AVIRIS-NG L2A Reflectance
 - [EMIT L1B Radiance](https://lpdaac.usgs.gov/products/emitl1bradv001/)
 - Any data in ENVI format
 
