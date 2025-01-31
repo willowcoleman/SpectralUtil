@@ -2,6 +2,7 @@ from spectral.io import envi
 import netCDF4 as nc
 import os
 import numpy as np
+import logging
 
 numpy_to_gdal = {
     np.dtype(np.float64): 7,
@@ -12,6 +13,34 @@ numpy_to_gdal = {
     np.dtype(np.uint16): 2,
     np.dtype(np.uint8): 1,
 }
+
+class ObservationMetadata:
+    def __init__(self, band_names, geotransform=None, projection=None, glt=None, pre_orthod=False, nodata_value=None):
+        """
+        Initializes the ObservationMetadata object.
+
+        Args:
+            band_names (list): List of band names.
+            geotransform (tuple, optional): GDAL-style geotransform array. Defaults to None.
+            projection (str, optional): Projection string. Defaults to None.
+            glt (numpy.ndarray, optional): 3d array of x and y indices. Defaults to None.
+            pre_orthod (bool, optional): Whether the data is already orthod. Defaults to False.
+            nodata_value (int, optional): The nodata value. Defaults to None.
+        """
+        self.obs_names = band_names
+        self.geotransform = geotransform
+        self.projection = projection
+        self.glt = glt
+        self.pre_orthod = False
+        self.nodata_value = nodata_value
+
+        if pre_orthod:
+            self.orthoable = False
+        elif self.glt is None:
+            self.orthoable = False
+        else:
+            self.orthoable = True
+
 
 class SpectralMetadata:
     def __init__(self, wavelengths, fwhm, geotransform=None, projection=None, glt=None, pre_orthod=False, nodata_value=None):
@@ -277,3 +306,37 @@ def open_airborne_rfl(input_file, lazy=True):
     meta = SpectralMetadata(wl, fwhm, trans, proj, glt=None, pre_orthod=True, nodata_value=nodata_value)
 
     return meta, rfl
+
+
+def open_airborne_obs(input_file, lazy=True, load_glt=False):
+    """
+    Opens an Airborne observation NetCDF file and extracts the spectral metadata and obs data.
+
+    Args:
+        input_file (str): Path to the NetCDF file.
+        lazy (bool, optional): If True, loads the radiance data lazily. Defaults to True.
+
+    Returns:
+        tuple: A tuple containing:
+            - SpectralMetadata: An object containing the wavelengths and FWHM.
+            - numpy.ndarray or netCDF4.Variable: The radiance data, either as a lazy-loaded variable or a fully loaded numpy array.
+    """
+    ds = nc.Dataset(input_file)
+    proj = ds.variables['transverse_mercator'].spatial_ref
+    trans = [float(x) for x in ds.variables['transverse_mercator'].GeoTransform.split(' ')]
+
+
+    obs_names = list(ds['observation_parameters'].variables.keys())
+
+    nodata_value = float(ds['observation_parameters'][obs_names[0]]._FillValue)
+    if load_glt:
+        glt = np.stack([ds['geolocation_lookup_table']['sample'][:],ds['geolocation_lookup_table']['line'][:]],axis=-1)
+
+    # Don't have a good solution for lazy here, temporarily ignoring...
+    if lazy:
+        logging.warning("Lazy loading not supported for observation data.")
+    obs = np.stack([ds['observation_parameters'][on] for on in obs_names], axis=-1)
+    
+    meta = ObservationMetadata(obs_names, trans, proj, glt=None, pre_orthod=True, nodata_value=nodata_value)
+
+    return meta, obs
