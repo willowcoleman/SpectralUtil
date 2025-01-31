@@ -90,12 +90,12 @@ class SpectralMetadata:
             return np.where(np.logical_and(self.wl >= wl - buffer, self.wl <= wl + buffer))
 
 
-def load_spectral(input_file, lazy=True, load_glt=False):
+def load_data(input_file, lazy=True, load_glt=False):
     """
-    Loads a spectral file and extracts the spectral metadata and data.
+    Loads a file and extracts the spectral metadata and data.
 
     Args:
-        input_file (str): Path to the input spectral file.
+        input_file (str): Path to the input file.
         lazy (bool, optional): If True, loads the data lazily. Defaults to True.
         load_glt (bool, optional): If True, loads the glt for orthoing. Defaults to False.
 
@@ -104,7 +104,7 @@ def load_spectral(input_file, lazy=True, load_glt=False):
 
     Returns:
         tuple: A tuple containing:
-            - SpectralMetadata: An object containing the wavelengths and FWHM.
+            - Metadata: An object containing the appropriate metadata
             - numpy.ndarray or netCDF4.Variable: The data, either as a lazy-loaded variable or a fully loaded numpy array.
     """
     if input_file.endswith(('.hdr', '.dat', '.img')) or '.' not in os.path.basename(input_file):
@@ -219,7 +219,7 @@ def open_envi(input_file, lazy=True):
 
 def open_netcdf(input_file, lazy=True, load_glt=False):
     """
-    Opens a NetCDF file and extracts the spectral metadata and data.
+    Opens a NetCDF file and extracts the metadata and data.
 
     Args:
         input_file (str): Path to the NetCDF file.
@@ -228,7 +228,7 @@ def open_netcdf(input_file, lazy=True, load_glt=False):
 
     Returns:
         tuple: A tuple containing:
-            - SpectralMetadata: An object containing the wavelengths and FWHM.
+            - Metadata: An object containing the appropriate metadata
             - numpy.ndarray or netCDF4.Variable: The data, either as a lazy-loaded variable or a fully loaded numpy array.
     """
     if 'EMIT' in input_file and 'RAD' in input_file:
@@ -237,6 +237,8 @@ def open_netcdf(input_file, lazy=True, load_glt=False):
         return open_airborne_rfl(input_file, lazy=lazy)
     elif ('ang' in input_file or 'ANG' in input_file) and 'RFL' in input_file:
         return open_airborne_rfl(input_file, lazy=lazy)
+    elif 'AV3' in input_file and 'OBS' in input_file:
+        return open_airborne_obs(input_file, lazy=lazy, load_glt=load_glt)
     else:
         raise ValueError(f'Unknown file type for {input_file}')
 
