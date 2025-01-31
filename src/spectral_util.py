@@ -2,7 +2,7 @@
 
 import click
 import numpy as np
-from spec_io import load_spectral, write_cog
+from spec_io import load_data, write_cog
 
 # Define common arguments
 def common_arguments(f):
@@ -37,7 +37,7 @@ def ndvi(input_file, output_file, ortho, red_wl, nir_wl, red_width, nir_width):
         nir_width (int): NIR band width [nm]; 0 = single wavelength.
     """
     click.echo(f"Running NDVI Calculation on {input_file}")
-    meta, rfl = load_spectral(input_file, lazy=True, load_glt=ortho)
+    meta, rfl = load_data(input_file, lazy=True, load_glt=ortho)
 
     red = rfl[..., meta.wl_index(red_wl, red_width)]
     nir = rfl[..., meta.wl_index(nir_wl, nir_width)]
@@ -72,7 +72,7 @@ def nbr(input_file, output_file, ortho, nir_wl, swir_wl, nir_width, swir_width):
     """  
 
     click.echo(f"Running NBR Calculation on {input_file}")
-    meta, rfl = load_spectral(input_file, lazy=True, load_glt=ortho)
+    meta, rfl = load_data(input_file, lazy=True, load_glt=ortho)
 
     nir = rfl[..., meta.wl_index(nir_wl)]
     swir = rfl[..., meta.wl_index(swir_wl)]
@@ -111,7 +111,7 @@ def rgb(input_file, output_file, ortho, red_wl, green_wl, blue_wl, stretch, scal
         raise ValueError("Cannot set both stretch and scale")
 
     click.echo(f"Running RGB Calculation on {input_file}")
-    meta, rfl = load_spectral(input_file, lazy=True, load_glt=ortho)
+    meta, rfl = load_data(input_file, lazy=True, load_glt=ortho)
 
     rgb = rfl[..., np.array([meta.wl_index(x) for x in [red_wl, green_wl, blue_wl]])]
     if stretch[0] != -1 and stretch[1] != -1:
