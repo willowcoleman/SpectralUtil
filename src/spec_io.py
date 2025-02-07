@@ -310,7 +310,7 @@ def open_airborne_rfl(input_file, lazy=True):
     return meta, rfl
 
 
-def open_airborne_obs(input_file, lazy=True, load_glt=False):
+def open_airborne_obs(input_file, lazy=True, load_glt=False, load_loc=False):
     """
     Opens an Airborne observation NetCDF file and extracts the spectral metadata and obs data.
 
@@ -333,6 +333,8 @@ def open_airborne_obs(input_file, lazy=True, load_glt=False):
     nodata_value = float(ds['observation_parameters'][obs_names[0]]._FillValue)
     if load_glt:
         glt = np.stack([ds['geolocation_lookup_table']['sample'][:],ds['geolocation_lookup_table']['line'][:]],axis=-1)
+    if load_loc:
+        loc = np.stack([ds['geolocation_lookup_table']['longitude'][:],ds['geolocation_lookup_table']['latitude'][:]],axis=-1)
 
     # Don't have a good solution for lazy here, temporarily ignoring...
     if lazy:
@@ -341,4 +343,11 @@ def open_airborne_obs(input_file, lazy=True, load_glt=False):
     
     meta = ObservationMetadata(obs_names, trans, proj, glt=None, pre_orthod=True, nodata_value=nodata_value)
 
-    return meta, obs
+    if load_glt and load_loc:
+        return meta, obs, glt, loc
+    elif load_glt:
+        return meta, obs, glt
+    elif load_loc:
+        return meta, obs, loc
+    else:
+        return meta, obs
