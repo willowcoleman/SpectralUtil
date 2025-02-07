@@ -7,18 +7,25 @@ from spec_io import ObservationMetadata, write_cog
 from osgeo import osr
 import logging
 
-def get_ul_lr_from_files(input_file_list):
+
+def get_ul_lr_from_files(filelist):
     """
     Get the upper left and lower right coordinates from the input file list.
 
     Args:
-        input_file_list (str): Path to the input file.
+        filelist (list): list of input files.
 
     Returns:
         tuple: The upper left and lower right coordinates in the format (ul_x, ul_y, lr_x, lr_y).
     """
-    filelist = open(input_file_list, 'r').readlines()
-    
+    ul_lr = [[np.nan,np.nan],[np.nan,np.nan]]
+    for file in filelist:
+        loc_ullr = get_extent_from_file(file.strip())
+        ul_lr[0] = np.min([ul_lr[0], loc_ullr[0]])
+        ul_lr[1] = np.max([ul_lr[1], loc_ullr[1]])
+        ul_lr[2] = np.max([ul_lr[2], loc_ullr[2]])
+        ul_lr[3] = np.min([ul_lr[3], loc_ullr[3]])
+    return ul_lr
 
 
 def get_subgrid_from_bounds(y_grid: np.array, x_grid: np.array, y_bounds: tuple, x_bounds: tuple):
@@ -139,8 +146,10 @@ def build_mosaic_test():
 @click.option('--y_resolution', type=float, default=None)
 @click.option('--target_extent_ul_lr', type=float, nargs=4, default=None)
 @click.option('--output_epsg', type=str, default=None)
+@click.option('--criteria_band', type=int, default=None)
+@click.option('--criteria_mode', type=str, default="min", options=["min", "max"])
 @click.option('--log_file', type=str, default=None)
-def from_obs_netcdfs(output_file, input_file_list, x_resolution, y_resolution, target_extent_ul_lr, output_epsg, log_file):
+def from_obs_netcdfs(output_file, input_file_list, x_resolution, y_resolution, target_extent_ul_lr, output_epsg, criteria_band, criteria_mode, log_file):
     """
     Build a mosaic from the input file.
 
@@ -151,6 +160,9 @@ def from_obs_netcdfs(output_file, input_file_list, x_resolution, y_resolution, t
         y_resolution (float): Y resolution of the output mosaic.
         target_extent_ul_lr ((float, float, float, float)): Target extent for the mosaic in the format (ul_x, ul_y, lr_x, lr_y).
         output_epsg (str): EPSG code for the output projection.
+        criteria_band (int): Band to use for the criteria.
+        criteria_mode (str): Mode to use for the criteria.
+        log_file (str): Path to the log file.
     """
     logging.debug(f"Building Mosaic from {input_file_list}")
     logging.debug(f"Output file: {output_file}")
@@ -166,14 +178,38 @@ def from_obs_netcdfs(output_file, input_file_list, x_resolution, y_resolution, t
     proj = osr.SpatialReference()
     proj.ImportFromEPSG(int(output_epsg))
 
+    input_files = open(input_file_list, 'r').readlines()
+
     if target_extent_ul_lr:
         ul_lr = target_extent_ul_lr
     else:
-        ul_lr = get_ul_lr_from_files(input_file_list)
+        ul_lr = get_ul_lr_from_files(input_files)
 
     trans = [ul_lr[0], x_resolution, 0, ul_lr[1], 0, y_resolution]
-
     meta = ObservationMetadata(['GLT X', 'GLT Y'], projection=proj.ExportToWkt(), geotransform=trans, pre_orthod=True, nodata_value=0)
+
+    glt = np.zeros(( int(np.ceil((ul_lr[3] - ul_lr[1]) / y_resolution)), 
+                     int(np.ceil((ul_lr[2] - ul_lr[0]) / x_resolution)),
+                     4), dtype=np.uint16)
+    
+
+    for file in input_files:
+        meta, obs = load_data(file.strip(), lazy=True, load_glt=False)
+        loc = load_location(file.strip())
+        if criteria_band is not None:
+            ob = obs[:,:,criteria_band]
+            
+        
+        if rfl is None:
+            continue
+        if rfl.shape[0] != glt.shape[0] or rfl.shape[1] != glt.shape[1]:
+            logging.warning(f"Skipping {file.strip()} due to shape mismatch.")
+            continue
+        if rfl.shape[2] != 4:
+            logging.warning(f"Skipping {file.strip()} due to band mismatch.")
+            continue
+        glt = np.maximum(glt, rfl)
+
 
 
 
