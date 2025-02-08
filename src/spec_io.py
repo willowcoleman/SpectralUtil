@@ -90,7 +90,7 @@ class SpectralMetadata:
             return np.where(np.logical_and(self.wl >= wl - buffer, self.wl <= wl + buffer))
 
 
-def load_data(input_file, lazy=True, load_glt=False):
+def load_data(input_file, lazy=True, load_glt=False, load_loc=False):
     """
     Loads a file and extracts the spectral metadata and data.
 
@@ -334,7 +334,7 @@ def open_airborne_obs(input_file, lazy=True, load_glt=False, load_loc=False):
     if load_glt:
         glt = np.stack([ds['geolocation_lookup_table']['sample'][:],ds['geolocation_lookup_table']['line'][:]],axis=-1)
     if load_loc:
-        loc = np.stack([ds['geolocation_lookup_table']['longitude'][:],ds['geolocation_lookup_table']['latitude'][:]],axis=-1)
+        loc = np.stack([ds['lon'][:],ds['lat'][:]],axis=-1)
 
     # Don't have a good solution for lazy here, temporarily ignoring...
     if lazy:
@@ -351,3 +351,24 @@ def open_airborne_obs(input_file, lazy=True, load_glt=False, load_loc=False):
         return meta, obs, loc
     else:
         return meta, obs
+
+
+def get_extent_from_obs(input_file):
+    """
+    Gets the extent of the observation data.
+
+    Args:
+        input_file (str): Path to the input file.
+
+    Returns:
+        tuple: A tuple containing:
+            - float: Upper left x-coordinate.
+            - float: Upper left y-coordinate.
+            - float: Lower right x-coordinate.
+            - float: Lower right y-coordinate.
+    """
+    # replace with open_airborne_obs once the lazy loading works
+    ds = nc.Dataset(input_file)
+    lat = ds['lat'][:]
+    lon = ds['lon'][:]
+    return np.min(lon), np.max(lat), np.max(lon), np.min(lat)

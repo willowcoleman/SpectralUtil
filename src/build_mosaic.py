@@ -1,9 +1,8 @@
 import click
 import numpy as np
 from scipy.spatial import KDTree
-from spec_io import load_data, write_cog
 import time
-from spec_io import ObservationMetadata, write_cog
+import spec_io
 from osgeo import osr
 import logging
 
@@ -18,13 +17,13 @@ def get_ul_lr_from_files(filelist):
     Returns:
         tuple: The upper left and lower right coordinates in the format (ul_x, ul_y, lr_x, lr_y).
     """
-    ul_lr = [[np.nan,np.nan],[np.nan,np.nan]]
+    ul_lr = [np.nan,np.nan,np.nan,np.nan]
     for file in filelist:
-        loc_ullr = get_extent_from_file(file.strip())
-        ul_lr[0] = np.min([ul_lr[0], loc_ullr[0]])
-        ul_lr[1] = np.max([ul_lr[1], loc_ullr[1]])
-        ul_lr[2] = np.max([ul_lr[2], loc_ullr[2]])
-        ul_lr[3] = np.min([ul_lr[3], loc_ullr[3]])
+        loc_ullr = spec_io.get_extent_from_obs(file.strip())
+        ul_lr[0] = np.nanmin([ul_lr[0], loc_ullr[0]])
+        ul_lr[1] = np.nanmax([ul_lr[1], loc_ullr[1]])
+        ul_lr[2] = np.nanmax([ul_lr[2], loc_ullr[2]])
+        ul_lr[3] = np.nanmin([ul_lr[3], loc_ullr[3]])
     return ul_lr
 
 
@@ -96,14 +95,14 @@ def find_subgrid_locations(y_grid: np.array, x_grid: np.array, y_subgrid: np.arr
 
     # Convert the flat indices to row, col indices
     row_indices, col_indices = np.unravel_index(indices, y_grid_minor.shape)
-    row_indices += y_start
-    col_indices += x_start
+    #row_indices += y_start
+    #col_indices += x_start
 
     # Return the row, col indices as a 2D array
     row_indices = row_indices.reshape(y_subgrid.shape)
     col_indices = col_indices.reshape(x_subgrid.shape)
 
-    return np.stack((row_indices, col_indices), axis=-1)
+    return np.stack((row_indices, col_indices), axis=-1), x_start, y_start
 
 
 #def build_mosaic(input_file_list, ul_x, ul_y, lr_x, lr_y, x_resolution, y_resolution, output_file):
@@ -147,7 +146,7 @@ def build_mosaic_test():
 @click.option('--target_extent_ul_lr', type=float, nargs=4, default=None)
 @click.option('--output_epsg', type=str, default=None)
 @click.option('--criteria_band', type=int, default=None)
-@click.option('--criteria_mode', type=str, default="min", options=["min", "max"])
+@click.option('--criteria_mode', type=click.Choice(["min","max"]), default="min")
 @click.option('--log_file', type=str, default=None)
 def from_obs_netcdfs(output_file, input_file_list, x_resolution, y_resolution, target_extent_ul_lr, output_epsg, criteria_band, criteria_mode, log_file):
     """
@@ -173,45 +172,64 @@ def from_obs_netcdfs(output_file, input_file_list, x_resolution, y_resolution, t
 
     if y_resolution is not None and y_resolution > 0:
         logging.warning("y_resolution is set to a positive value, which is not common.  Unless this is being done very intentionally, stop, and make y negative.")
+    elif y_resolution is None:
+        y_resolution = -1 * x_resolution
+
+
+    if input_file_list.endswith(".nc"):
+        input_files = [input_file_list]
+    else:
+        input_files = open(input_file_list, 'r').readlines()
 
     # get projection from EPSG
-    proj = osr.SpatialReference()
-    proj.ImportFromEPSG(int(output_epsg))
-
-    input_files = open(input_file_list, 'r').readlines()
+    if output_epsg is not None:
+        proj = osr.SpatialReference()
+        proj.ImportFromEPSG(int(output_epsg))
+        proj = proj.ExportToWkt()
+    else:
+        meta, obs = spec_io.load_data(input_files[0].strip(), lazy=True, load_glt=False)
+        proj = meta.projection
 
     if target_extent_ul_lr:
         ul_lr = target_extent_ul_lr
     else:
         ul_lr = get_ul_lr_from_files(input_files)
+    
+    print("Bounding box (ul_lr): " + str(ul_lr)) 
 
     trans = [ul_lr[0], x_resolution, 0, ul_lr[1], 0, y_resolution]
-    meta = ObservationMetadata(['GLT X', 'GLT Y'], projection=proj.ExportToWkt(), geotransform=trans, pre_orthod=True, nodata_value=0)
+    meta = spec_io.ObservationMetadata(['GLT X', 'GLT Y', 'File Index', 'OBS val'], projection=proj, geotransform=trans, pre_orthod=True, nodata_value=0)
 
     glt = np.zeros(( int(np.ceil((ul_lr[3] - ul_lr[1]) / y_resolution)), 
                      int(np.ceil((ul_lr[2] - ul_lr[0]) / x_resolution)),
                      4), dtype=np.uint16)
+    y_grid, x_grid = np.meshgrid(np.linspace(trans[3], trans[3] + trans[5]*glt.shape[0],glt.shape[0]), 
+                                 np.linspace(trans[0], trans[0] + trans[1]*glt.shape[1],glt.shape[1]),
+                                 indexing='ij')
     
 
-    for file in input_files:
-        meta, obs = load_data(file.strip(), lazy=True, load_glt=False)
-        loc = load_location(file.strip())
+    for _file, file in enumerate(input_files):
+        local_meta, obs, loc = spec_io.load_data(file.strip(), lazy=True, load_glt=False, load_loc=True)
         if criteria_band is not None:
             ob = obs[:,:,criteria_band]
             
-        
-        if rfl is None:
-            continue
-        if rfl.shape[0] != glt.shape[0] or rfl.shape[1] != glt.shape[1]:
-            logging.warning(f"Skipping {file.strip()} due to shape mismatch.")
-            continue
-        if rfl.shape[2] != 4:
-            logging.warning(f"Skipping {file.strip()} due to band mismatch.")
-            continue
-        glt = np.maximum(glt, rfl)
+        sub_glt, x_offset, y_offset = find_subgrid_locations(y_grid, x_grid, loc[...,1], loc[...,0])  
+
+        # handle offset
+        existing_crit = glt[sub_glt[...,0]+y_offset, sub_glt[...,1]+x_offset, 3]
+        if criteria_mode == "min":
+            crit_mask = np.logical_and(ob < existing_crit, np.isnan(existing_crit) == False)
+        elif criteria_mode == "max":
+            crit_mask = np.logical_and(ob > existing_crit, np.isnan(existing_crit) == False)
+        else:
+            raise ValueError(f"Invalid criteria_mode: {criteria_mode}")
+
+        glt[sub_glt[crit_mask,0]+y_offset, sub_glt[crit_mask,1]+x_offset, :2] = sub_glt[crit_mask,:]
+        glt[sub_glt[crit_mask,0]+y_offset, sub_glt[crit_mask,1]+x_offset, 2] = _file
+        glt[sub_glt[crit_mask,0]+y_offset, sub_glt[crit_mask,1]+x_offset, 3] = ob[crit_mask]
 
 
-
+    spec_io.write_cog(output_file, glt, meta, nodata_value=0)
 
 
 
