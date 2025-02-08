@@ -427,12 +427,13 @@ def open_airborne_obs(input_file, lazy=True, load_glt=False, load_loc=False):
         return meta, obs
 
 
-def get_extent_from_obs(input_file):
+def get_extent_from_obs(input_file, get_resolution=False):
     """
     Gets the extent of the observation data.
 
     Args:
         input_file (str): Path to the input file.
+        get_resolution (bool, optional): If True, returns the resolution as well. Defaults to False.
 
     Returns:
         tuple: A tuple containing:
@@ -445,4 +446,9 @@ def get_extent_from_obs(input_file):
     ds = nc.Dataset(input_file)
     lat = ds['lat'][:]
     lon = ds['lon'][:]
-    return np.min(lon), np.max(lat), np.max(lon), np.min(lat)
+    if get_resolution:
+        # Not quite right
+        res = np.abs(np.mean(np.diff(lat))), np.abs(np.mean(np.diff(lon)))
+        return np.min(lon), np.max(lat), np.max(lon), np.min(lat), None, None
+    else:
+        return np.min(lon), np.max(lat), np.max(lon), np.min(lat)
