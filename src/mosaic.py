@@ -6,6 +6,7 @@ from scipy.signal import convolve2d
 import time
 import spec_io
 from osgeo import osr
+import pyproj
 import logging
 
 
@@ -198,7 +199,7 @@ def build_mosaic_test():
 @click.option('--x_resolution', type=float, default=None)
 @click.option('--y_resolution', type=float, default=None)
 @click.option('--target_extent_ul_lr', type=float, nargs=4, default=None)
-@click.option('--output_epsg', type=str, default=None)
+@click.option('--output_epsg', type=str, default=4326)
 @click.option('--criteria_band', type=int, default=None)
 @click.option('--criteria_mode', type=click.Choice(["min","max"]), default="min")
 @click.option('--log_file', type=str, default=None)
@@ -235,29 +236,30 @@ def build_obs_nc(output_file, input_file_list, x_resolution, y_resolution, targe
     else:
         input_files = open(input_file_list, 'r').readlines()
 
-    # get projection from EPSG
-    if output_epsg is not None:
-        proj = osr.SpatialReference()
-        proj.ImportFromEPSG(int(output_epsg))
-        proj = proj.ExportToWkt()
-    else:
-        #meta, obs = spec_io.load_data(input_files[0].strip(), lazy=True, load_glt=False)
-        #proj = meta.projection
-        proj = osr.SpatialReference()
-        proj.ImportFromEPSG(4326)
-        proj = proj.ExportToWkt()
+    gproj = osr.SpatialReference()
+    gproj.ImportFromEPSG(int(output_epsg))
+    wkt = gproj.ExportToWkt()
+    proj = pyproj.Proj(f"epsg:{output_epsg}")
 
     if target_extent_ul_lr:
-        ul_lr = target_extent_ul_lr
+        ul_lr = target_extent_ul_lr # in output epsg projection
     else:
+        # Always gets this in 4326
         ul_lr = get_ul_lr_from_files(input_files, get_resolution=False)
+        # convert to output epsg
+        ul = proj(ul_lr[0], ul_lr[1])
+        lr = proj(ul_lr[2], ul_lr[3])
+        ul_lr = [ul[0], ul[1], lr[0], lr[1]]
     
+    if str(output_epsg)[0] == "3" and x_resolution > 1:
+        raise ValueError(f"x_resolution is {x_resolution} (indicating meters), and EPSG is {output_epsg}.  Smells like lat/lon and UTM mismatch.  Terminating.")
+
     logging.info("Bounding box (ul_lr): " + str(ul_lr)) 
 
     trans = [ul_lr[0] - x_resolution/2., x_resolution, 0, 
              ul_lr[1] - y_resolution/2., 0, y_resolution]
     meta = spec_io.GenericGeoMetadata(['GLT X', 'GLT Y', 'File Index', 'OBS val'], 
-                                      projection=proj, 
+                                      projection=wkt, 
                                       geotransform=trans, 
                                       pre_orthod=True, 
                                       nodata_value=0)
