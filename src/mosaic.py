@@ -125,6 +125,8 @@ def find_subgrid_locations(y_grid: np.array, x_grid: np.array, y_subgrid: np.arr
 
     # Convert the flat indices to row, col indices
     row_indices, col_indices = np.unravel_index(indices, y_subgrid.shape)
+
+    # Offset by 1; 0 is nodata
     row_indices += 1
     col_indices += 1
 
@@ -137,6 +139,8 @@ def find_subgrid_locations(y_grid: np.array, x_grid: np.array, y_subgrid: np.arr
                                      np.arange(x_start, x_start + y_grid_minor.shape[1]), indexing='ij')
 
     sub_glt_insert_idx = np.stack(sub_glt_insert_idx, axis=-1)
+
+    # Interpolated values are negative
     if max_distance is not None:
         mask = distances < max_distance
         col_indices[mask] *= -1
@@ -147,6 +151,10 @@ def find_subgrid_locations(y_grid: np.array, x_grid: np.array, y_subgrid: np.arr
         mask = distances.reshape(y_grid_minor.shape) > md
         col_indices[mask] *= -1
         row_indices[mask] *= -1
+
+    # Esnure nodata masking is consistent between rows and columns
+    row_indices[col_indices == 0] = 0
+    col_indices[row_indices == 0] = 0
 
     return np.stack((col_indices, row_indices), axis=-1), sub_glt_insert_idx
 
@@ -256,7 +264,9 @@ def build_obs_nc(output_file, input_file_list, x_resolution, y_resolution, targe
 
     glt = np.zeros(( int(np.ceil((ul_lr[3] - ul_lr[1]) / y_resolution)), 
                      int(np.ceil((ul_lr[2] - ul_lr[0]) / x_resolution)),
-                     4), dtype=np.int32)
+                     3), dtype=np.int32)
+    criteria = np.zeros((glt.shape[0], glt.shape[1]), dtype=np.float32)
+    criteria[...] = np.nan
 
     x_grid_steps = np.arange(ul_lr[1], ul_lr[1] + trans[5]*(glt.shape[0]+1),trans[5])
     y_grid_steps = np.arange(ul_lr[0], ul_lr[0] + trans[1]*(glt.shape[1]+1),trans[1])
@@ -268,24 +278,30 @@ def build_obs_nc(output_file, input_file_list, x_resolution, y_resolution, targe
         local_meta, obs, loc = spec_io.load_data(file.strip(), lazy=True, load_glt=False, load_loc=True)
             
         sub_glt, sub_glt_insert_idx = find_subgrid_locations(y_grid, x_grid, loc[...,1], loc[...,0])  
-        if sub_glt is None or sub_glt.shape[0] == 0:
+        remove_negatives(sub_glt, clean_contiguous=True)
+
+        if sub_glt is None:
             continue
 
         if criteria_band is not None:
-            ob = obs[:,:,criteria_band]
-            existing_crit = glt[sub_glt_insert_idx[:,0], sub_glt_insert_idx[:,1], 3]
-            valid = np.logical_and(np.isnan(existing_crit) == False, ob != local_meta.nodata_value)
+            raw_ob = obs[:,:,criteria_band]
+            ob = raw_ob[np.abs(sub_glt[...,1])-1, np.abs(sub_glt[...,0])-1]
+            existing_crit = criteria[sub_glt_insert_idx[...,0], sub_glt_insert_idx[...,1]]
+            valid =  np.logical_and(sub_glt[...,0] != meta.nodata_value, ob != local_meta.nodata_value)
+
             if criteria_mode == "min":
                 crit_mask = np.logical_and(ob < existing_crit, valid)
             elif criteria_mode == "max":
                 crit_mask = np.logical_and(ob > existing_crit, valid)
             else:
                 raise ValueError(f"Invalid criteria_mode: {criteria_mode}")
+            
+            # In any mode, if there were no previous data, that counts too
+            crit_mask = np.logical_or(crit_mask, np.logical_and(valid, np.isnan(existing_crit)))
 
             # only assign criteria band if used
-            glt[sub_glt_insert_idx[crit_mask,0], sub_glt_insert_idx[crit_mask,1], 3] = ob[crit_mask]
+            criteria[sub_glt_insert_idx[crit_mask,0], sub_glt_insert_idx[crit_mask,1]] = ob[crit_mask]
         else:
-            remove_negatives(sub_glt, clean_contiguous=True)
             crit_mask = sub_glt[...,0] != 0 
 
         glt[sub_glt_insert_idx[crit_mask,0], sub_glt_insert_idx[crit_mask,1], :2] = sub_glt[crit_mask,:]
