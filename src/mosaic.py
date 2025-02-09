@@ -8,6 +8,7 @@ import spec_io
 from osgeo import osr
 import pyproj
 import logging
+from tqdm import tqdm
 
 
 def remove_negatives(glt, clean_contiguous=False, clean_interpolated=False):
@@ -173,7 +174,7 @@ def find_subgrid_locations(y_grid: np.array, x_grid: np.array, y_subgrid: np.arr
 @click.option('--n_cores', type=int, default=1)
 @click.option('--log_file', type=str, default=None)
 @click.option('--log_level', type=click.Choice(["DEBUG","INFO","WARN","ERROR"]), default="INFO")
-def build_obs_nc(output_file, input_file_list, x_resolution, y_resolution, target_extent_ul_lr, output_epsg, criteria_band, criteria_mode, log_file, log_level):
+def build_obs_nc(output_file, input_file_list, x_resolution, y_resolution, target_extent_ul_lr, output_epsg, criteria_band, criteria_mode, n_cores, log_file, log_level):
     """
     Build a mosaic from the input file.
 
@@ -256,7 +257,7 @@ def build_obs_nc(output_file, input_file_list, x_resolution, y_resolution, targe
                                  y_grid_steps,
                                  indexing='ij')
     
-    for _file, file in enumerate(input_files):
+    for _file, file in enumerate(tqdm(input_files, desc="Calculating GLT, File:", unit="files", ncols=80)):
         local_meta, obs, loc = spec_io.load_data(file.strip(), lazy=True, load_glt=False, load_loc=True)
         loc = np.stack(proj(loc[...,0],loc[...,1]),axis=-1)
             
