@@ -203,7 +203,8 @@ def build_mosaic_test():
 @click.option('--criteria_band', type=int, default=None)
 @click.option('--criteria_mode', type=click.Choice(["min","max"]), default="min")
 @click.option('--log_file', type=str, default=None)
-def build_obs_nc(output_file, input_file_list, x_resolution, y_resolution, target_extent_ul_lr, output_epsg, criteria_band, criteria_mode, log_file):
+@click.option('--log_level', type=click.Choice(["DEBUG","INFO","WARN","ERROR"]), default="INFO")
+def build_obs_nc(output_file, input_file_list, x_resolution, y_resolution, target_extent_ul_lr, output_epsg, criteria_band, criteria_mode, log_file, log_level):
     """
     Build a mosaic from the input file.
 
@@ -217,7 +218,16 @@ def build_obs_nc(output_file, input_file_list, x_resolution, y_resolution, targe
         criteria_band (int): Band to use for the criteria.
         criteria_mode (str): Mode to use for the criteria.
         log_file (str): Path to the log file.
+        log_level (str): Logging verbosity.
     """
+
+    logging.basicConfig(
+        format="%(levelname)s:%(asctime)s || %(filename)s:%(funcName)s() | %(message)s",
+        level=log_level,
+        filename=log_file,
+        datefmt="%Y-%m-%d,%H:%M:%S",
+    )
+
     logging.debug(f"Building Mosaic from {input_file_list}")
     logging.debug(f"Output file: {output_file}")
     logging.debug(f"x_resolution: {x_resolution}")
@@ -234,7 +244,7 @@ def build_obs_nc(output_file, input_file_list, x_resolution, y_resolution, targe
     if input_file_list.endswith(".nc"):
         input_files = [input_file_list]
     else:
-        input_files = open(input_file_list, 'r').readlines()
+        input_files = [x.strip() for x in open(input_file_list, 'r').readlines()]
 
     gproj = osr.SpatialReference()
     gproj.ImportFromEPSG(int(output_epsg))
@@ -251,7 +261,7 @@ def build_obs_nc(output_file, input_file_list, x_resolution, y_resolution, targe
         lr = proj(ul_lr[2], ul_lr[3])
         ul_lr = [ul[0], ul[1], lr[0], lr[1]]
     
-    if str(output_epsg)[0] == "3" and x_resolution > 1:
+    if str(output_epsg)[0] == "4" and x_resolution > 1:
         raise ValueError(f"x_resolution is {x_resolution} (indicating meters), and EPSG is {output_epsg}.  Smells like lat/lon and UTM mismatch.  Terminating.")
 
     logging.info("Bounding box (ul_lr): " + str(ul_lr)) 
@@ -278,12 +288,14 @@ def build_obs_nc(output_file, input_file_list, x_resolution, y_resolution, targe
     
     for _file, file in enumerate(input_files):
         local_meta, obs, loc = spec_io.load_data(file.strip(), lazy=True, load_glt=False, load_loc=True)
+        loc = np.stack(proj(loc[...,0],loc[...,1]),axis=-1)
             
         sub_glt, sub_glt_insert_idx = find_subgrid_locations(y_grid, x_grid, loc[...,1], loc[...,0])  
-        remove_negatives(sub_glt, clean_contiguous=True)
-
         if sub_glt is None:
+            logging.debug(f'{file} OOB')
             continue
+
+        remove_negatives(sub_glt, clean_contiguous=True)
 
         if criteria_band is not None:
             raw_ob = obs[:,:,criteria_band]

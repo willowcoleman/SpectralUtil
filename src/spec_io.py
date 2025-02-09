@@ -274,9 +274,9 @@ def open_netcdf(input_file, lazy=True, load_glt=False, load_loc=False):
         return open_airborne_rfl(input_file, lazy=lazy)
     elif 'AV3' in input_file and 'RDN' in input_file:
         return open_airborne_rdn(input_file, lazy=lazy)
-    elif 'AV3' in input_file and 'OBS' in input_file:
+    elif ('av3' in input_file.lower() or 'ang' in input_file.lower()) and 'OBS' in input_file:
         return open_airborne_obs(input_file, lazy=lazy, load_glt=load_glt, load_loc=load_loc)
-    elif ('ang' in input_file or 'ANG' in input_file) and 'RFL' in input_file:
+    elif 'ang' in input_file.lowwer()  and 'RFL' in input_file.lower():
         return open_airborne_rfl(input_file, lazy=lazy)
     elif 'AV3' in input_file and 'OBS' in input_file:
         return open_airborne_obs(input_file, lazy=lazy, load_glt=load_glt)
