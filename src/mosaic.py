@@ -30,9 +30,7 @@ def remove_negatives(glt, clean_contiguous=False, clean_interpolated=False):
     return glt
 
 
-
-
-def get_ul_lr_from_files(filelist):
+def get_ul_lr_from_files(filelist, get_resolution=False):
     """
     Get the upper left and lower right coordinates from the input file list.
 
@@ -103,7 +101,7 @@ def find_subgrid_locations(y_grid: np.array, x_grid: np.array, y_subgrid: np.arr
         int: The number of columns in the subgrid
         int: The number of rows in the subgrid
     """
-
+    st = time.time()
     # Start by subsetting the (possibly) much larger main grid
     # to only the ROI
     y_grid_minor, x_grid_minor, y_start, x_start = get_subgrid_from_bounds(y_grid, x_grid, (np.min(y_subgrid), np.max(y_subgrid)), (np.min(x_subgrid), np.max(x_subgrid)))
@@ -118,9 +116,12 @@ def find_subgrid_locations(y_grid: np.array, x_grid: np.array, y_subgrid: np.arr
 
     # Create a KDTree for the main grid points
     tree = KDTree(subgrid_points)
+    logging.debug(f"Time to build tree: {time.time() - st}")
 
     # Query the KDTree for the nearest neighbors
+    st = time.time()
     distances, indices = tree.query(main_grid_points)
+    logging.debug(f"Time to querry tree: {time.time() - st}")
 
     # Convert the flat indices to row, col indices
     row_indices, col_indices = np.unravel_index(indices, y_subgrid.shape)
@@ -241,7 +242,7 @@ def build_obs_nc(output_file, input_file_list, x_resolution, y_resolution, targe
     if target_extent_ul_lr:
         ul_lr = target_extent_ul_lr
     else:
-        ul_lr, res = get_ul_lr_from_files(input_files, get_resolution=True)
+        ul_lr = get_ul_lr_from_files(input_files, get_resolution=False)
     
     logging.info("Bounding box (ul_lr): " + str(ul_lr)) 
 
@@ -273,17 +274,19 @@ def build_obs_nc(output_file, input_file_list, x_resolution, y_resolution, targe
         if criteria_band is not None:
             ob = obs[:,:,criteria_band]
             existing_crit = glt[sub_glt_insert_idx[:,0], sub_glt_insert_idx[:,1], 3]
+            valid = np.logical_and(np.isnan(existing_crit) == False, ob != local_meta.nodata_value)
             if criteria_mode == "min":
-                crit_mask = np.logical_and(ob < existing_crit, np.isnan(existing_crit) == False)
+                crit_mask = np.logical_and(ob < existing_crit, valid)
             elif criteria_mode == "max":
-                crit_mask = np.logical_and(ob > existing_crit, np.isnan(existing_crit) == False)
+                crit_mask = np.logical_and(ob > existing_crit, valid)
             else:
                 raise ValueError(f"Invalid criteria_mode: {criteria_mode}")
 
             # only assign criteria band if used
             glt[sub_glt_insert_idx[crit_mask,0], sub_glt_insert_idx[crit_mask,1], 3] = ob[crit_mask]
         else:
-            crit_mask = np.ones((sub_glt.shape[0],sub_glt.shape[1]), dtype=bool)
+            remove_negatives(sub_glt, clean_contiguous=True)
+            crit_mask = sub_glt[...,0] != 0 
 
         glt[sub_glt_insert_idx[crit_mask,0], sub_glt_insert_idx[crit_mask,1], :2] = sub_glt[crit_mask,:]
         glt[sub_glt_insert_idx[crit_mask,0], sub_glt_insert_idx[crit_mask,1], 2] = _file + 1
@@ -308,12 +311,13 @@ def apply_glt(glt_file, raw_files, output_file, nodata_value, bands):
         glt_file (str): Path to the GLT file.
         raw_files (str): Path to the raw files.
         output_file (str): Path to the output file.
-        bands (int): Bands to use for the output (None = all)
         nodata_value (float): Nodata value for the output.
+        bands (int): Bands to use for the output (None = all)
     """
     glt_meta, glt = spec_io.load_data(glt_file, lazy=False)
-    glt = glt.astype(np.int32) # need to convert before subtracting
+    glt = glt.astype(np.int32) # make sure we're not in legacy uint format
     glt_nonblank = glt[...,0] != glt_meta.nodata_value
+    glt[...,:2] = np.abs(glt[...,:2])
     if glt_meta.nodata_value == 0:
         glt[...,:3] -= 1
 
@@ -333,8 +337,8 @@ def apply_glt(glt_file, raw_files, output_file, nodata_value, bands):
             outdata = np.zeros((glt.shape[0], glt.shape[1], dat.shape[2]), dtype=dat.dtype) + nodata_value
 
         if np.any(glt[...,2] == _file):
-            valid_glt = np.logical_and(glt_nonblank, glt[...,2] == _file)
-            outdata[valid_glt, :] = dat[np.abs(glt[valid_glt, 1]), np.abs(glt[valid_glt, 0]), :]
+            valid_glt = glt[...,2] == _file
+            outdata[valid_glt, :] = dat[glt[valid_glt, 1], glt[valid_glt, 0], :]
 
     spec_io.write_cog(output_file, outdata, glt_meta, nodata_value=nodata_value)
 
