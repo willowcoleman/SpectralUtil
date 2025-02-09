@@ -84,7 +84,7 @@ def get_subgrid_from_bounds(y_grid: np.array, x_grid: np.array, y_bounds: tuple,
     return subgrid_y, subgrid_x, y_locs[0], x_locs[0]
 
 
-def find_subgrid_locations(y_grid: np.array, x_grid: np.array, y_subgrid: np.array, x_subgrid: np.array, max_distance: float = None):
+def find_subgrid_locations(y_grid: np.array, x_grid: np.array, y_subgrid: np.array, x_subgrid: np.array, max_distance: float = None, n_workers: int = 1) -> tuple[np.ndarray, int, int, int, int]:
     """
     Find the locations of the subgrid elements within the main grid.
 
@@ -94,6 +94,7 @@ def find_subgrid_locations(y_grid: np.array, x_grid: np.array, y_subgrid: np.arr
         y_subgrid (np.ndarray): The y coordinates of the subgrid.
         x_subgrid (np.ndarray): The x coordinates of the subgrid.
         max_distance (float): The maximum distance to search for the nearest neighbor.
+        n_workers (float): Number of works to execute call in parallel with.
 
     Returns:
         np.ndarray: The (row, col) indices of the subgrid elements in the main grid.
@@ -121,7 +122,7 @@ def find_subgrid_locations(y_grid: np.array, x_grid: np.array, y_subgrid: np.arr
 
     # Query the KDTree for the nearest neighbors
     st = time.time()
-    distances, indices = tree.query(main_grid_points)
+    distances, indices = tree.query(main_grid_points, workers=n_workers)
     logging.debug(f"Time to querry tree: {time.time() - st}")
 
     # Convert the flat indices to row, col indices
@@ -160,39 +161,6 @@ def find_subgrid_locations(y_grid: np.array, x_grid: np.array, y_subgrid: np.arr
     return np.stack((col_indices, row_indices), axis=-1), sub_glt_insert_idx
 
 
-#def build_mosaic(input_file_list, ul_x, ul_y, lr_x, lr_y, x_resolution, y_resolution, output_file):
-def build_mosaic_test():
-    """
-    Build a mosaic from the input file.
-
-    Args:
-        output_file (str): Path to the output file.
-        criteria_file_list (str): Path to the input file.
-        ul_x (float): Upper left x coordinate.
-        ul_y (float): Upper left y coordinate.
-        lr_x (float): Lower right x coordinate.
-        lr_y (float): Lower right y coordinate.
-        x_resolution (float): X resolution of the output mosaic.
-        y_resolution (float): Y resolution of the output mosaic.
-    """
-    #click.echo(f"Building Mosaic from {input_file_list}")
-    #meta, rfl = load_data(input_file, lazy=True, load_glt=ortho)
-
-    #x_steps = np.arange(ul_x, lr_x, x_resolution)
-    #y_steps = np.arange(ul_y, lr_y, y_resolution)
-
-    #y_grid, x_grid = np.meshgrid(x_steps, y_steps, indexing='ij')
-    x_steps = np.arange(10000)
-    y_steps = np.arange(20000)
-    y_grid, x_grid = np.meshgrid(x_steps, y_steps, indexing='ij')
-
-    y_subgrid, x_subgrid = np.meshgrid(np.linspace(1000.5,2000.5,1000), np.linspace(2000.5,3000.5,1000), indexing='ij')
-
-    start_time = time.time()
-    find_subgrid_locations(y_grid, x_grid, y_subgrid, x_subgrid)
-    click.echo(f"Time taken: {time.time() - start_time} seconds")
-
-
 @click.command()
 @click.argument('output_file', type=click.Path())
 @click.argument('input_file_list', type=click.Path(exists=True))
@@ -202,6 +170,7 @@ def build_mosaic_test():
 @click.option('--output_epsg', type=str, default=4326)
 @click.option('--criteria_band', type=int, default=None)
 @click.option('--criteria_mode', type=click.Choice(["min","max"]), default="min")
+@click.option('--n_cores', type=int, default=1)
 @click.option('--log_file', type=str, default=None)
 @click.option('--log_level', type=click.Choice(["DEBUG","INFO","WARN","ERROR"]), default="INFO")
 def build_obs_nc(output_file, input_file_list, x_resolution, y_resolution, target_extent_ul_lr, output_epsg, criteria_band, criteria_mode, log_file, log_level):
@@ -217,6 +186,7 @@ def build_obs_nc(output_file, input_file_list, x_resolution, y_resolution, targe
         output_epsg (str): EPSG code for the output projection.
         criteria_band (int): Band to use for the criteria.
         criteria_mode (str): Mode to use for the criteria.
+        n_cores (int): Number of cores to use for processing.
         log_file (str): Path to the log file.
         log_level (str): Logging verbosity.
     """
@@ -290,7 +260,7 @@ def build_obs_nc(output_file, input_file_list, x_resolution, y_resolution, targe
         local_meta, obs, loc = spec_io.load_data(file.strip(), lazy=True, load_glt=False, load_loc=True)
         loc = np.stack(proj(loc[...,0],loc[...,1]),axis=-1)
             
-        sub_glt, sub_glt_insert_idx = find_subgrid_locations(y_grid, x_grid, loc[...,1], loc[...,0])  
+        sub_glt, sub_glt_insert_idx = find_subgrid_locations(y_grid, x_grid, loc[...,1], loc[...,0], n_workers=n_cores)  
         if sub_glt is None:
             logging.debug(f'{file} OOB')
             continue
