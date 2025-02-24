@@ -207,13 +207,23 @@ def open_envi(input_file, lazy=True):
             - numpy.ndarray: The data, either as a lazy-loaded memory map or a fully loaded numpy array.
     """
     header = envi_header(input_file)
-    ds = envi.open(header, input_file)
+    ds = envi.open(header)
     wl = np.array([float(x) for x in ds.metadata['wavelength']])
     fwhm = np.array([float(x) for x in ds.metadata['fwhm']])
-    nodata_value = float(ds.metadata['data ignore value'])
-    proj = ds.metadata['coordinate system string']
-    map_info = ds.metadata['map info'].split(',')
-    trans = [float(map_info[3]), float(map_info[5]), 0, float(map_info[4]), 0, -float(map_info[6])]
+    if 'data ignore value' in ds.metadata:
+        nodata_value = float(ds.metadata['data ignore value'])
+    else:
+        nodata_value = -9999 # set default
+
+    if 'coordinate system string' in ds.metadata:
+        proj = ds.metadata['coordinate system string']
+    else:
+        proj = None
+    if 'map info' in ds.metadata:
+        map_info = ds.metadata['map info'].split(',')
+        trans = [float(map_info[3]), float(map_info[5]), 0, float(map_info[4]), 0, -float(map_info[6])]
+    else:
+        map_info, trans = None, None
 
     if lazy:
         rfl = ds.open_memmap(interleave='bip', writable=False)
@@ -276,7 +286,7 @@ def open_netcdf(input_file, lazy=True, load_glt=False, load_loc=False):
         return open_airborne_rdn(input_file, lazy=lazy)
     elif ('av3' in input_file.lower() or 'ang' in input_file.lower()) and 'OBS' in input_file:
         return open_airborne_obs(input_file, lazy=lazy, load_glt=load_glt, load_loc=load_loc)
-    elif 'ang' in input_file.lowwer()  and 'RFL' in input_file.lower():
+    elif 'ang' in input_file.lower()  and 'rfl' in input_file.lower():
         return open_airborne_rfl(input_file, lazy=lazy)
     elif 'AV3' in input_file and 'OBS' in input_file:
         return open_airborne_obs(input_file, lazy=lazy, load_glt=load_glt)

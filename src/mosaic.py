@@ -328,17 +328,18 @@ def apply_glt(glt_file, raw_files, output_file, nodata_value, bands):
         input_files = [raw_files]
 
     outdata = None
-    for _file, file in enumerate(input_files):
-        meta, dat = spec_io.load_data(file.strip(), lazy=True, load_glt=False)
-        if bands is None:
-            bands = np.arange(dat.shape[2])
-        dat = dat[...,bands]
-
-        if outdata is None:
-            outdata = np.zeros((glt.shape[0], glt.shape[1], dat.shape[2]), dtype=dat.dtype) + nodata_value
-
+    for _file, file in enumerate(tqdm(input_files, ncols=80, desc="Apply GLT, File:", unit="files")):
         if np.any(glt[...,2] == _file):
             valid_glt = glt[...,2] == _file
+
+            meta, dat = spec_io.load_data(file.strip(), lazy=True, load_glt=False)
+            if bands is None:
+                bands = np.arange(dat.shape[2])
+            dat = dat[...,bands]
+
+            if outdata is None:
+                outdata = np.zeros((glt.shape[0], glt.shape[1], dat.shape[2]), dtype=dat.dtype) + nodata_value
+
             outdata[valid_glt, :] = dat[glt[valid_glt, 1], glt[valid_glt, 0], :]
 
     spec_io.write_cog(output_file, outdata, glt_meta, nodata_value=nodata_value)
