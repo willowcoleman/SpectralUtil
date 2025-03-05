@@ -1,4 +1,5 @@
 import click
+import os
 import numpy as np
 from scipy.spatial import KDTree
 from scipy.signal import convolve2d
@@ -163,8 +164,61 @@ def find_subgrid_locations(y_grid: np.array, x_grid: np.array, y_subgrid: np.arr
 
 
 @click.command()
+@click.argument('glt_files', type=click.Path(exists=True), nargs=-1)
+@click.argument('obs_file_lists', type=click.Path(exists=True), nargs=-1)
+@click.argument('output_glt_file', type=click.Path())
+@click.argument('output_file_list', type=click.Path())
+def stack_glts(glt_files, obs_file_lists, output_file, output_file_list):
+    """
+    Stack the GLTs from the input files.
+
+    Args:
+        glt_files (list): List of GLT files to stack, in order.
+        obs_file_lists (list): List of observation file lists, matching order to glt_files.
+        output_file (str): Path to the output file.
+        output_file_list (str): Path to the output file list.
+    """
+    
+    glt = None
+    file_list = None
+    
+    file_lists_raw = []
+    for fl in obs_file_lists:
+        if not os.path.exists(fl):
+            raise ValueError(f"File {fl} does not exist.")
+        file_lists_raw.extend([x.strip() for x in open(fl, 'r').readlines()])
+    merged_file_list, file_list_idx = np.unique(file_lists_raw, return_inverse=True)
+    
+    intra_list_idx = 0
+    for glt_file, obs_file_list in zip(glt_files, obs_file_lists):
+        glt_meta, glt_data = spec_io.load_data(glt_file, lazy=False)
+        converted_glt_data = glt_data.copy()
+        converted_glt_data[...,2] = -1
+        
+        for idx in range(intra_list_idx, intra_list_idx + len(obs_file_list)):
+            converted_glt_data[...,2][glt_data[...,2] == idx - intra_list_idx] = file_list_idx[idx]
+        
+        if glt is None:
+            glt = glt_data
+        else:
+            to_copy = glt[...,2] == -9999
+            glt[to_copy,:] = converted_glt_data[to_copy,:]
+
+        glt_data = remove_negatives(glt_data, clean_contiguous=True, clean_interpolated=True)
+
+        if glt is None:
+            glt = glt_data
+        else:
+            glt = np.concatenate((glt, glt_data), axis=2)
+    
+    spec_io.write_cog(output_file, glt, glt_meta, nodata_value=-9999)
+    np.savetxt(output_file_list, merged_file_list, fmt="%s")
+
+
+@click.command()
 @click.argument('output_file', type=click.Path())
 @click.argument('input_file_list', type=click.Path(exists=True))
+@click.option('--ignore_file_list', type=click.Path(exists=True), default=None)
 @click.option('--x_resolution', type=float, default=None)
 @click.option('--y_resolution', type=float, default=None)
 @click.option('--target_extent_ul_lr', type=float, nargs=4, default=None)
@@ -174,13 +228,14 @@ def find_subgrid_locations(y_grid: np.array, x_grid: np.array, y_subgrid: np.arr
 @click.option('--n_cores', type=int, default=1)
 @click.option('--log_file', type=str, default=None)
 @click.option('--log_level', type=click.Choice(["DEBUG","INFO","WARN","ERROR"]), default="INFO")
-def build_obs_nc(output_file, input_file_list, x_resolution, y_resolution, target_extent_ul_lr, output_epsg, criteria_band, criteria_mode, n_cores, log_file, log_level):
+def build_obs_nc(output_file, input_file_list, ignore_file_list, x_resolution, y_resolution, target_extent_ul_lr, output_epsg, criteria_band, criteria_mode, n_cores, log_file, log_level):
     """
     Build a mosaic from the input file.
 
     Args:
         output_file (str): Path to the output file.
         input_file_list (str): Path to the input file.
+        ignore_file_list (str): Path to a list of files (subset of input_file_list) to be ignored during the mosaic.
         x_resolution (float): X resolution of the output mosaic.
         y_resolution (float): Y resolution of the output mosaic.
         target_extent_ul_lr ((float, float, float, float)): Target extent for the mosaic in the format (ul_x, ul_y, lr_x, lr_y).
@@ -200,6 +255,8 @@ def build_obs_nc(output_file, input_file_list, x_resolution, y_resolution, targe
     )
 
     logging.debug(f"Building Mosaic from {input_file_list}")
+    if ignore_file_list is not None:
+        logging.debug(f"Excluding files from {ignore_file_list}")
     logging.debug(f"Output file: {output_file}")
     logging.debug(f"x_resolution: {x_resolution}")
     logging.debug(f"y_resolution: {y_resolution}")
@@ -216,6 +273,10 @@ def build_obs_nc(output_file, input_file_list, x_resolution, y_resolution, targe
         input_files = [input_file_list]
     else:
         input_files = [x.strip() for x in open(input_file_list, 'r').readlines()]
+
+    ignore_files = []
+    if ignore_file_list is not None:
+        ignore_files = [x.strip() for x in open(ignore_file_list, 'r').readlines()]
 
     gproj = osr.SpatialReference()
     gproj.ImportFromEPSG(int(output_epsg))
@@ -258,6 +319,9 @@ def build_obs_nc(output_file, input_file_list, x_resolution, y_resolution, targe
                                  indexing='ij')
     
     for _file, file in enumerate(tqdm(input_files, desc="Calculating GLT, File:", unit="files", ncols=80)):
+        if file in ignore_files:
+            logging.debug(f'{file} Ignored')
+            continue
         local_meta, obs, loc = spec_io.load_data(file.strip(), lazy=True, load_glt=False, load_loc=True)
         loc = np.stack(proj(loc[...,0],loc[...,1]),axis=-1)
             
