@@ -368,10 +368,10 @@ def build_obs_nc(output_file, input_file_list, ignore_file_list, x_resolution, y
     criteria = np.zeros((glt.shape[0], glt.shape[1]), dtype=np.float32)
     criteria[...] = np.nan
 
-    x_grid_steps = np.arange(ul_lr[1], ul_lr[1] + trans[5]*glt.shape[0],trans[5])
-    y_grid_steps = np.arange(ul_lr[0], ul_lr[0] + trans[1]*glt.shape[1],trans[1])
-    y_grid, x_grid = np.meshgrid(x_grid_steps, 
-                                 y_grid_steps,
+    y_grid_steps = np.arange(ul_lr[1], ul_lr[3] - trans[5]*0.01,trans[5])
+    x_grid_steps = np.arange(ul_lr[0], ul_lr[2] - trans[1]*0.01,trans[1])
+    y_grid, x_grid = np.meshgrid(y_grid_steps, 
+                                 x_grid_steps,
                                  indexing='ij')
     
     for _file, file in enumerate(tqdm(input_files, desc="Calculating GLT, File:", unit="files", ncols=80)):
