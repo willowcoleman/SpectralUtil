@@ -1,4 +1,5 @@
 import click
+import os
 import numpy as np
 from scipy.spatial import KDTree
 from scipy.signal import convolve2d
@@ -9,6 +10,8 @@ from osgeo import osr
 import pyproj
 import logging
 from tqdm import tqdm
+from copy import deepcopy
+osr.UseExceptions()
 
 
 def remove_negatives(glt, clean_contiguous=False, clean_interpolated=False):
@@ -149,8 +152,13 @@ def find_subgrid_locations(y_grid: np.array, x_grid: np.array, y_subgrid: np.arr
         col_indices[mask] *= -1
         row_indices[mask] *= -1
     else:
-        md = np.sqrt((y_grid_minor[1,0] - y_grid_minor[0,0])**2 + \
-                    (x_grid_minor[0,1] - x_grid_minor[0,0])**2) * 1.5
+        if all([s > 1 for s in x_grid_minor.shape]) and all([s > 1 for s in y_grid_minor.shape]):
+            md = np.sqrt((y_grid_minor[1,0] - y_grid_minor[0,0])**2 + \
+                        (x_grid_minor[0,1] - x_grid_minor[0,0])**2) * 1.5
+        else:
+            # corner case where only one line of grid is present
+            md = np.sqrt((y_grid_minor.flatten()[1] - y_grid_minor.flatten()[0])**2 + \
+                        (x_grid_minor.flatten()[1] - x_grid_minor.flatten()[0])**2) * 1.5
         mask = distances.reshape(y_grid_minor.shape) > md
         col_indices[mask] *= -1
         row_indices[mask] *= -1
@@ -163,8 +171,110 @@ def find_subgrid_locations(y_grid: np.array, x_grid: np.array, y_subgrid: np.arr
 
 
 @click.command()
+@click.argument('glt_files', type=click.Path(exists=True), nargs=-1)
+@click.argument('output_glt_file', type=click.Path())
+def stack_glts_common(glt_files, output_glt_file):
+    """
+    Stack the GLTs from the input files.
+
+    Args:
+        glt_files (list): List of GLT files to stack, in order.
+        output_glt_file (str): Path to the output glt.
+    """
+    
+    glt = None
+    file_list = None
+    
+    file_lists_raw = []
+    for fl in obs_file_lists:
+        if not os.path.exists(fl):
+            raise ValueError(f"File {fl} does not exist.")
+        file_lists_raw.extend([x.strip() for x in open(fl, 'r').readlines()])
+    merged_file_list, file_list_idx = np.unique(file_lists_raw, return_inverse=True)
+    
+    intra_list_idx = 0
+    for glt_file, obs_file_list in zip(glt_files, obs_file_lists):
+        glt_meta, glt_data = spec_io.load_data(glt_file, lazy=False)
+        converted_glt_data = glt_data.copy()
+        converted_glt_data[...,2] = -1
+        
+        for idx in range(intra_list_idx, intra_list_idx + len(obs_file_list)):
+            converted_glt_data[...,2][glt_data[...,2] == idx - intra_list_idx] = file_list_idx[idx]
+        
+        if glt is None:
+            glt = glt_data
+        else:
+            to_copy = glt[...,2] == -9999
+            glt[to_copy,:] = converted_glt_data[to_copy,:]
+
+        glt_data = remove_negatives(glt_data, clean_contiguous=True, clean_interpolated=True)
+
+        if glt is None:
+            glt = glt_data
+        else:
+            glt = np.concatenate((glt, glt_data), axis=2)
+    
+    spec_io.write_cog(output_file, glt, glt_meta, nodata_value=-9999)
+    np.savetxt(output_file_list, merged_file_list, fmt="%s")
+
+
+
+
+@click.command()
+@click.argument('glt_files', type=click.Path(exists=True))
+@click.argument('obs_file_lists', type=click.Path(exists=True))
+@click.argument('output_glt_file', type=click.Path())
+@click.argument('output_file_list', type=click.Path())
+def stack_glts(glt_files, obs_file_lists, output_glt_file, output_file_list):
+    """
+    Stack the GLTs from the input files.
+
+    Args:
+        glt_files (list): List of GLT files to stack, in order.
+        obs_file_lists (list): List of observation file lists, matching order to glt_files.
+        output_glt_file (str): Path to the output glt file.
+        output_file_list (str): Path to the output file list.
+    """
+    
+    glt = None
+    file_list = None
+    
+    file_lists_raw = []
+    obs_file_lists = [x.strip() for x in open(obs_file_lists, 'r').readlines()]
+    glt_files = [x.strip() for x in open(glt_files, 'r').readlines()]
+    for fl in obs_file_lists:
+        if not os.path.exists(fl):
+            raise ValueError(f"File {fl} does not exist.")
+        file_lists_raw.extend([x.strip() for x in open(fl, 'r').readlines()])
+    merged_file_list, file_list_idx = np.unique(file_lists_raw, return_inverse=True)
+    
+    intra_list_idx = 0
+    for glt_file, obs_file_list in zip(glt_files, obs_file_lists):
+        glt_meta, glt_data = spec_io.load_data(glt_file, lazy=False)
+        converted_glt_data = glt_data.copy()
+        converted_glt_data[...,2] = -1
+        
+        original_file_idxs = np.unique(glt_data[...,2])
+        #for idx in range(intra_list_idx, intra_list_idx + len(obs_file_list)):
+            #converted_glt_data[...,2][glt_data[...,2] == idx - intra_list_idx] = file_list_idx[idx]
+        for idx in original_file_idxs:
+            converted_glt_data[...,2][glt_data[...,2] == idx] = file_list_idx[idx]
+        
+        if glt is None:
+            glt = glt_data
+        else:
+            to_copy = np.logical_and(glt[...,2] == 0, converted_glt_data[...,2] > 0)
+            glt[to_copy,:] = converted_glt_data[to_copy,:]
+
+        intra_list_idx += len(obs_file_list)
+    spec_io.write_cog(output_glt_file, glt, glt_meta, nodata_value=0)
+    np.savetxt(output_file_list, merged_file_list, fmt="%s")
+
+
+@click.command()
 @click.argument('output_file', type=click.Path())
 @click.argument('input_file_list', type=click.Path(exists=True))
+@click.option('--ignore_file_list', type=click.Path(exists=True), default=None)
 @click.option('--x_resolution', type=float, default=None)
 @click.option('--y_resolution', type=float, default=None)
 @click.option('--target_extent_ul_lr', type=float, nargs=4, default=None)
@@ -174,13 +284,14 @@ def find_subgrid_locations(y_grid: np.array, x_grid: np.array, y_subgrid: np.arr
 @click.option('--n_cores', type=int, default=1)
 @click.option('--log_file', type=str, default=None)
 @click.option('--log_level', type=click.Choice(["DEBUG","INFO","WARN","ERROR"]), default="INFO")
-def build_obs_nc(output_file, input_file_list, x_resolution, y_resolution, target_extent_ul_lr, output_epsg, criteria_band, criteria_mode, n_cores, log_file, log_level):
+def build_obs_nc(output_file, input_file_list, ignore_file_list, x_resolution, y_resolution, target_extent_ul_lr, output_epsg, criteria_band, criteria_mode, n_cores, log_file, log_level):
     """
     Build a mosaic from the input file.
 
     Args:
         output_file (str): Path to the output file.
         input_file_list (str): Path to the input file.
+        ignore_file_list (str): Path to a list of files (subset of input_file_list) to be ignored during the mosaic.
         x_resolution (float): X resolution of the output mosaic.
         y_resolution (float): Y resolution of the output mosaic.
         target_extent_ul_lr ((float, float, float, float)): Target extent for the mosaic in the format (ul_x, ul_y, lr_x, lr_y).
@@ -200,6 +311,8 @@ def build_obs_nc(output_file, input_file_list, x_resolution, y_resolution, targe
     )
 
     logging.debug(f"Building Mosaic from {input_file_list}")
+    if ignore_file_list is not None:
+        logging.debug(f"Excluding files from {ignore_file_list}")
     logging.debug(f"Output file: {output_file}")
     logging.debug(f"x_resolution: {x_resolution}")
     logging.debug(f"y_resolution: {y_resolution}")
@@ -216,6 +329,10 @@ def build_obs_nc(output_file, input_file_list, x_resolution, y_resolution, targe
         input_files = [input_file_list]
     else:
         input_files = [x.strip() for x in open(input_file_list, 'r').readlines()]
+
+    ignore_files = []
+    if ignore_file_list is not None:
+        ignore_files = [x.strip() for x in open(ignore_file_list, 'r').readlines()]
 
     gproj = osr.SpatialReference()
     gproj.ImportFromEPSG(int(output_epsg))
@@ -251,17 +368,22 @@ def build_obs_nc(output_file, input_file_list, x_resolution, y_resolution, targe
     criteria = np.zeros((glt.shape[0], glt.shape[1]), dtype=np.float32)
     criteria[...] = np.nan
 
-    x_grid_steps = np.arange(ul_lr[1], ul_lr[1] + trans[5]*glt.shape[0],trans[5])
-    y_grid_steps = np.arange(ul_lr[0], ul_lr[0] + trans[1]*glt.shape[1],trans[1])
-    y_grid, x_grid = np.meshgrid(x_grid_steps, 
-                                 y_grid_steps,
+    y_grid_steps = np.arange(ul_lr[1], ul_lr[3] - trans[5]*0.01,trans[5])
+    x_grid_steps = np.arange(ul_lr[0], ul_lr[2] - trans[1]*0.01,trans[1])
+    y_grid, x_grid = np.meshgrid(y_grid_steps, 
+                                 x_grid_steps,
                                  indexing='ij')
     
     for _file, file in enumerate(tqdm(input_files, desc="Calculating GLT, File:", unit="files", ncols=80)):
+        if file in ignore_files:
+            logging.debug(f'{file} Ignored')
+            continue
+
         local_meta, obs, loc = spec_io.load_data(file.strip(), lazy=True, load_glt=False, load_loc=True)
         loc = np.stack(proj(loc[...,0],loc[...,1]),axis=-1)
             
         sub_glt, sub_glt_insert_idx = find_subgrid_locations(y_grid, x_grid, loc[...,1], loc[...,0], n_workers=n_cores)  
+
         if sub_glt is None:
             logging.debug(f'{file} OOB')
             continue
@@ -304,7 +426,8 @@ def build_obs_nc(output_file, input_file_list, x_resolution, y_resolution, targe
 @click.argument('output_file', type=click.Path())
 @click.option('--nodata_value', type=float, default=-9999)
 @click.option('--bands', default=None, type=int, multiple=True)
-def apply_glt(glt_file, raw_files, output_file, nodata_value, bands):
+@click.option('--output_format', default='tif', type=str, help="Output format")
+def apply_glt(glt_file, raw_files, output_file, nodata_value, bands, output_format):
     """
     Apply the GLT to the input files.
 
@@ -333,7 +456,7 @@ def apply_glt(glt_file, raw_files, output_file, nodata_value, bands):
             valid_glt = glt[...,2] == _file
 
             meta, dat = spec_io.load_data(file.strip(), lazy=True, load_glt=False)
-            if bands is None:
+            if bands is None or len(bands) == 0:
                 bands = np.arange(dat.shape[2])
             dat = dat[...,bands]
 
@@ -342,7 +465,15 @@ def apply_glt(glt_file, raw_files, output_file, nodata_value, bands):
 
             outdata[valid_glt, :] = dat[glt[valid_glt, 1], glt[valid_glt, 0], :]
 
-    spec_io.write_cog(output_file, outdata, glt_meta, nodata_value=nodata_value)
+    if outdata is not None:
+        output_meta = deepcopy(meta)
+        output_meta.projection = glt_meta.projection
+        output_meta.geotransform = glt_meta.geotransform
+        if output_format == 'tif':
+            spec_io.write_cog(output_file, outdata, output_meta, nodata_value=nodata_value)
+        elif output_format == 'envi':
+            spec_io.create_envi_file(output_file, outdata.shape, output_meta, outdata.dtype)
+            spec_io.write_bil_chunk(outdata.transpose((0,2,1)), output_file, 0, (glt.shape[0], outdata.shape[-1], glt.shape[1]) )
 
 
 @click.group()
@@ -352,6 +483,7 @@ def cli():
 
 cli.add_command(build_obs_nc)
 cli.add_command(apply_glt)
+cli.add_command(stack_glts)
 
 
 if __name__ == '__main__':

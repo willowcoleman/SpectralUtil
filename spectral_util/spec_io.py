@@ -1,4 +1,5 @@
 from spectral.io import envi
+from osgeo import gdal
 import netCDF4 as nc
 import os
 import numpy as np
@@ -154,7 +155,6 @@ def write_cog(output_file, data, meta, ortho=True, nodata_value=-9999):
         nodata_value (, optional): The nodata value to use. Defaults to -9999.
         gdal_dtype (int, optional): The GDAL data type to use. Defaults to 6 (Float32).
     """
-    from osgeo import gdal
     driver = gdal.GetDriverByName('MEM')
 
     if ortho and meta.orthoable:
@@ -175,7 +175,7 @@ def write_cog(output_file, data, meta, ortho=True, nodata_value=-9999):
     ds.BuildOverviews('NEAREST', [2, 4, 8, 16, 32, 64, 128])
     
     tiff_driver = gdal.GetDriverByName('GTiff')
-    output_dataset = tiff_driver.CreateCopy(output_file, ds, options=['COMPRESS=LZW', 'COPY_SRC_OVERVIEWS=YES', 'TILED=YES', 'BLOCKXSIZE=256', 'BLOCKYSIZE=256'])
+    output_dataset = tiff_driver.CreateCopy(output_file, ds, options=['COMPRESS=LZW', 'BIGTIFF=YES','COPY_SRC_OVERVIEWS=YES', 'TILED=YES', 'BLOCKXSIZE=256', 'BLOCKYSIZE=256'])
     ds = None
     output_dataset = None
 
@@ -208,8 +208,14 @@ def open_envi(input_file, lazy=True):
     """
     header = envi_header(input_file)
     ds = envi.open(header)
-    wl = np.array([float(x) for x in ds.metadata['wavelength']])
-    fwhm = np.array([float(x) for x in ds.metadata['fwhm']])
+    if 'wavelength' in ds.__dict__:
+        wl = np.array([float(x) for x in ds.metadata['wavelength']])
+    else:
+        wl = None
+    if 'fwhm' in ds.__dict__:
+        fwhm = np.array([float(x) for x in ds.metadata['fwhm']])
+    else:
+        fwhm = None
     if 'data ignore value' in ds.metadata:
         nodata_value = float(ds.metadata['data ignore value'])
     else:
@@ -231,7 +237,6 @@ def open_envi(input_file, lazy=True):
         rfl = ds.open_memmap(interleave='bip').copy()
 
     meta = SpectralMetadata(wl, fwhm, nodata_value=nodata_value, geotransform=trans, projection=proj)
-    
     return meta, rfl
     
 
@@ -249,7 +254,6 @@ def open_tif(input_file, lazy=False):
             - numpy.ndarray: The data, either as a lazy-loaded memory map or a fully loaded numpy array.
     """
     logging.warning('Lazy loading not supported for GeoTIFF data.')
-    from osgeo import gdal
     ds = gdal.Open(input_file)
     proj = ds.GetProjection()
     trans = ds.GetGeoTransform()
@@ -462,3 +466,57 @@ def get_extent_from_obs(input_file, get_resolution=False):
         return np.min(lon), np.max(lat), np.max(lon), np.min(lat), None, None
     else:
         return np.min(lon), np.max(lat), np.max(lon), np.min(lat)
+
+
+def write_bil_chunk(dat, outfile, line, shape, dtype = 'float32'):
+    """
+    Write a chunk of data to a binary, BIL formatted data cube.
+    Args:
+        dat: data to write
+        outfile: output file to write to
+        line: line of the output file to write to
+        shape: shape of the output file
+        dtype: output data type
+
+    Returns:
+        None
+    """
+    outfile = open(outfile, 'rb+')
+    outfile.seek(line * shape[1] * shape[2] * np.dtype(dtype).itemsize)
+    outfile.write(dat.astype(dtype).tobytes())
+    outfile.close()
+
+
+def create_envi_file(output_file, data_shape, meta, dtype='float32'):
+    """
+    Creates an ENVI file with the given data and metadata.
+
+    Args:
+        output_file (str): Path to the output ENVI file.
+        data_shape (tuple): The shape of the data to be written (rows, cols, bands).
+        meta (SpectralMetadata): The spectral metadata containing wavelengths and FWHM.
+        dtype (str, optional): The data type of the output file. Defaults to 'float32'.
+    """
+
+    # Create base file....gdal doesn't seem to like to write all the metadata, so we'll clean that up after
+    driver = gdal.GetDriverByName('ENVI')
+    driver.Register()
+    outDataset = driver.Create(output_file, data_shape[1], data_shape[0], data_shape[2], numpy_to_gdal[dtype], options=['INTERLEAVE=BIL'])
+    outDataset.SetGeoTransform(meta.geotransform)
+    outDataset.SetProjection(meta.projection)
+    del outDataset
+
+
+    # Touch up the header file
+    header = envi.read_envi_header(envi_header(output_file))
+
+    if 'wl' in meta.__dict__ and meta.wl is not None:
+        header['wavelength'] = '{' + ', '.join(map(str, meta.wl)) + '}'
+    if 'fwhm' in meta.__dict__ and meta.fwhm is not None:
+        header['fwhm'] = '{' + ', '.join(map(str, meta.fwhm)) + '}'
+    if 'band_names' in meta.__dict__ and meta.band_names is not None:
+        header['band names'] = '{' + ', '.join(meta.band_names) + '}'
+
+    header['data ignore value'] = str(meta.nodata_value)
+
+    envi.write_envi_header(envi_header(output_file), header) 
