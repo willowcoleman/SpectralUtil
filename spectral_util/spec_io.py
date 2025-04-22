@@ -135,10 +135,12 @@ def ortho_data(data, glt, glt_mask=None, glt_nodata=0, nodata_value=-9999):
     valid_glt = np.all(glt != glt_nodata, axis=-1)
     if glt_mask is not None:
         valid_glt = np.logical_and(valid_glt, glt_mask)
+    
+    glt_tmp = np.abs(glt).astype(int)
 
     if glt_nodata == 0:
-        glt[valid_glt] -= 1
-    outdata[valid_glt, :] = data[np.abs(glt[valid_glt, 1]), np.abs(glt[valid_glt, 0]), :]
+        glt_tmp[valid_glt] -= 1
+    outdata[valid_glt, :] = data[np.abs(glt_tmp[valid_glt, 1]), np.abs(glt_tmp[valid_glt, 0]), :]
     return outdata
 
 
