@@ -18,14 +18,14 @@ import spec_io
 @click.option('--search_only', is_flag=True, default=False, help='Location to put symlinks')
 def find_download_and_combine(output_folder, 
                               temporal = None, 
-                              count = 200000,
+                              count = 2000,
                               bounding_box = None,
                               overwrite = False,
                               symlinks_folder = None,
                               search_only = False):
     '''Find, download, and combine into VRTs all matching granules and store in OUTPUT_FOLDER
 
-    Rceommended usage: start with --seach_only to review FIDs before downloading
+    Rceommended usage: start with --search_only to review FIDs before downloading
     
     Search a DAAC using Earthaccess to find granules matching temporal and bounding_box. Download all the L1B and L2B products for
     each granule (except the full radiance as it takes too long and we don't need it generally for GHG analysis). Then, for each line,
