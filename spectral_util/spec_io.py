@@ -131,8 +131,11 @@ def ortho_data(data, glt, glt_mask=None, glt_nodata=0, nodata_value=-9999):
     Returns:
         numpy.ndarray: The orthorectified data.
     """
+    do_squeeze = False
     if len(data.shape) == 2:
         data = np.expand_dims(data, axis = -1)
+        do_squeeze = True
+
     outdata = np.zeros((glt.shape[0], glt.shape[1], data.shape[2]), dtype=data.dtype) + nodata_value
     valid_glt = np.all(glt != glt_nodata, axis=-1)
     if glt_mask is not None:
@@ -143,7 +146,10 @@ def ortho_data(data, glt, glt_mask=None, glt_nodata=0, nodata_value=-9999):
     if glt_nodata == 0:
         glt_tmp[valid_glt] -= 1
     outdata[valid_glt, :] = data[np.abs(glt_tmp[valid_glt, 1]), np.abs(glt_tmp[valid_glt, 0]), :]
-    data = np.squeeze(data) # Change it back!
+
+    if do_squeeze:
+        data = np.squeeze(data) # Change it back!
+
     return outdata
 
 
