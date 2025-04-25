@@ -329,9 +329,9 @@ def build_obs_nc(output_file, input_file_list, ignore_file_list, x_resolution, y
             logging.debug(f'{file} Ignored')
             continue
 
-        local_meta, obs, loc = spec_io.load_data(file.strip(), lazy=True, load_glt=False, load_loc=True)
-        loc = np.stack(proj(loc[...,0],loc[...,1]),axis=-1)
-            
+        local_meta, obs = spec_io.load_data(file.strip(), lazy=True, load_glt=False, load_loc=True)
+        loc = np.stack(proj(local_meta.loc[...,0],local_meta.loc[...,1]),axis=-1)
+
         sub_glt, sub_glt_insert_idx = find_subgrid_locations(y_grid, x_grid, loc[...,1], loc[...,0], n_workers=n_cores)  
 
         if sub_glt is None:
