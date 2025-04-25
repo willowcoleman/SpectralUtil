@@ -208,25 +208,26 @@ def open_envi(input_file, lazy=True):
     """
     header = envi_header(input_file)
     ds = envi.open(header)
-    if 'wavelength' in ds.__dict__:
-        wl = np.array([float(x) for x in ds.metadata['wavelength']])
+    imeta = ds.metadata
+    if 'wavelength' in imeta:
+        wl = np.array([float(x) for x in imeta['wavelength']])
     else:
         wl = None
-    if 'fwhm' in ds.__dict__:
-        fwhm = np.array([float(x) for x in ds.metadata['fwhm']])
+    if 'fwhm' in imeta:
+        fwhm = np.array([float(x) for x in imeta['fwhm']])
     else:
         fwhm = None
-    if 'data ignore value' in ds.metadata:
-        nodata_value = float(ds.metadata['data ignore value'])
+    if 'data ignore value' in imeta:
+        nodata_value = float(imeta['data ignore value'])
     else:
         nodata_value = -9999 # set default
 
-    if 'coordinate system string' in ds.metadata:
-        proj = ds.metadata['coordinate system string']
+    if 'coordinate system string' in imeta:
+        proj = imeta['coordinate system string']
     else:
         proj = None
-    if 'map info' in ds.metadata:
-        map_info = ds.metadata['map info'].split(',')
+    if 'map info' in imeta:
+        map_info = imeta['map info'].split(',')
         trans = [float(map_info[3]), float(map_info[5]), 0, float(map_info[4]), 0, -float(map_info[6])]
     else:
         map_info, trans = None, None
@@ -511,11 +512,11 @@ def create_envi_file(output_file, data_shape, meta, dtype='float32'):
     header = envi.read_envi_header(envi_header(output_file))
 
     if 'wl' in meta.__dict__ and meta.wl is not None:
-        header['wavelength'] = '{' + ', '.join(map(str, meta.wl)) + '}'
+        header['wavelength'] = '{ ' + ', '.join(map(str, meta.wl)) + ' }'
     if 'fwhm' in meta.__dict__ and meta.fwhm is not None:
-        header['fwhm'] = '{' + ', '.join(map(str, meta.fwhm)) + '}'
+        header['fwhm'] = '{ ' + ', '.join(map(str, meta.fwhm)) + ' }'
     if 'band_names' in meta.__dict__ and meta.band_names is not None:
-        header['band names'] = '{' + ', '.join(meta.band_names) + '}'
+        header['band names'] = '{ ' + ', '.join(meta.band_names) + ' }'
 
     header['data ignore value'] = str(meta.nodata_value)
 
