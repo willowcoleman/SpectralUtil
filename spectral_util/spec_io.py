@@ -149,6 +149,7 @@ def ortho_data(data, glt, glt_mask=None, glt_nodata=0, nodata_value=-9999):
 
     if do_squeeze:
         data = np.squeeze(data) # Change it back!
+        outdata = np.squeeze(outdata)
 
     return outdata
 
