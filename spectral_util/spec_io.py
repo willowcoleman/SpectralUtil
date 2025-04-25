@@ -132,16 +132,27 @@ def ortho_data(data, glt, glt_mask=None, glt_nodata=0, nodata_value=-9999):
     Returns:
         numpy.ndarray: The orthorectified data.
     """
+    do_squeeze = False
+    if len(data.shape) == 2:
+        data = np.expand_dims(data, axis = -1)
+        do_squeeze = True
+
     outdata = np.zeros((glt.shape[0], glt.shape[1], data.shape[2]), dtype=data.dtype) + nodata_value
     valid_glt = np.all(glt != glt_nodata, axis=-1)
     if glt_mask is not None:
         valid_glt = np.logical_and(valid_glt, glt_mask)
+    
+    glt_tmp = np.abs(glt).astype(int)
 
     if glt_nodata == 0:
-        glt[valid_glt] -= 1
-    outdata[valid_glt, :] = data[np.abs(glt[valid_glt, 1]), np.abs(glt[valid_glt, 0]), :]
-    return outdata
+        glt_tmp[valid_glt] -= 1
+    outdata[valid_glt, :] = data[np.abs(glt_tmp[valid_glt, 1]), np.abs(glt_tmp[valid_glt, 0]), :]
 
+    if do_squeeze:
+        data = np.squeeze(data) # Change it back!
+        outdata = np.squeeze(outdata)
+
+    return outdata
 
 
 def write_cog(output_file, data, meta, ortho=True, nodata_value=-9999):
