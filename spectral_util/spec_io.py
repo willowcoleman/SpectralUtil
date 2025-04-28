@@ -16,7 +16,7 @@ numpy_to_gdal = {
 }
 
 class GenericGeoMetadata:
-    def __init__(self, band_names, geotransform=None, projection=None, glt=None, pre_orthod=False, nodata_value=None):
+    def __init__(self, band_names, geotransform=None, projection=None, glt=None, pre_orthod=False, nodata_value=None, loc=None):
         """
         Initializes the GenericGeoMetadata object.
 
@@ -34,6 +34,7 @@ class GenericGeoMetadata:
         self.glt = glt
         self.pre_orthod = False
         self.nodata_value = nodata_value
+        self.loc = loc
 
         if pre_orthod:
             self.orthoable = False
@@ -109,11 +110,11 @@ def load_data(input_file, lazy=True, load_glt=False, load_loc=False):
             - numpy.ndarray or netCDF4.Variable: The data, either as a lazy-loaded variable or a fully loaded numpy array.
     """
     if input_file.endswith(('.hdr', '.dat', '.img')) or '.' not in os.path.basename(input_file):
-        return open_envi(input_file, lazy=True)
+        return open_envi(input_file, lazy=lazy)
     elif input_file.endswith('.nc'):
-        return open_netcdf(input_file, lazy=True, load_glt=load_glt, load_loc=load_loc)
-    elif input_file.endswith('.tif'):
-        return open_tif(input_file, lazy=True)
+        return open_netcdf(input_file, lazy=lazy, load_glt=load_glt, load_loc=load_loc)
+    elif input_file.endswith('.tif') or input_file.endswith('.vrt'):
+        return open_tif(input_file, lazy=lazy)
     else:
         raise ValueError(f'Unknown file type for {input_file}')
 
@@ -131,16 +132,27 @@ def ortho_data(data, glt, glt_mask=None, glt_nodata=0, nodata_value=-9999):
     Returns:
         numpy.ndarray: The orthorectified data.
     """
+    do_squeeze = False
+    if len(data.shape) == 2:
+        data = np.expand_dims(data, axis = -1)
+        do_squeeze = True
+
     outdata = np.zeros((glt.shape[0], glt.shape[1], data.shape[2]), dtype=data.dtype) + nodata_value
     valid_glt = np.all(glt != glt_nodata, axis=-1)
     if glt_mask is not None:
         valid_glt = np.logical_and(valid_glt, glt_mask)
+    
+    glt_tmp = np.abs(glt).astype(int)
 
     if glt_nodata == 0:
-        glt[valid_glt] -= 1
-    outdata[valid_glt, :] = data[np.abs(glt[valid_glt, 1]), np.abs(glt[valid_glt, 0]), :]
-    return outdata
+        glt_tmp[valid_glt] -= 1
+    outdata[valid_glt, :] = data[np.abs(glt_tmp[valid_glt, 1]), np.abs(glt_tmp[valid_glt, 0]), :]
 
+    if do_squeeze:
+        data = np.squeeze(data) # Change it back!
+        outdata = np.squeeze(outdata)
+
+    return outdata
 
 
 def write_cog(output_file, data, meta, ortho=True, nodata_value=-9999):
@@ -208,25 +220,26 @@ def open_envi(input_file, lazy=True):
     """
     header = envi_header(input_file)
     ds = envi.open(header)
-    if 'wavelength' in ds.__dict__:
-        wl = np.array([float(x) for x in ds.metadata['wavelength']])
+    imeta = ds.metadata
+    if 'wavelength' in imeta:
+        wl = np.array([float(x) for x in imeta['wavelength']])
     else:
         wl = None
-    if 'fwhm' in ds.__dict__:
-        fwhm = np.array([float(x) for x in ds.metadata['fwhm']])
+    if 'fwhm' in imeta:
+        fwhm = np.array([float(x) for x in imeta['fwhm']])
     else:
         fwhm = None
-    if 'data ignore value' in ds.metadata:
-        nodata_value = float(ds.metadata['data ignore value'])
+    if 'data ignore value' in imeta:
+        nodata_value = float(imeta['data ignore value'])
     else:
         nodata_value = -9999 # set default
 
-    if 'coordinate system string' in ds.metadata:
-        proj = ds.metadata['coordinate system string']
+    if 'coordinate system string' in imeta:
+        proj = imeta['coordinate system string']
     else:
         proj = None
-    if 'map info' in ds.metadata:
-        map_info = ds.metadata['map info'].split(',')
+    if 'map info' in imeta:
+        map_info = imeta['map info'].split(',')
         trans = [float(map_info[3]), float(map_info[5]), 0, float(map_info[4]), 0, -float(map_info[6])]
     else:
         map_info, trans = None, None
@@ -253,7 +266,8 @@ def open_tif(input_file, lazy=False):
             - GenericGeoMetadata: An object containing the wavelengths and FWHM.
             - numpy.ndarray: The data, either as a lazy-loaded memory map or a fully loaded numpy array.
     """
-    logging.warning('Lazy loading not supported for GeoTIFF data.')
+    if lazy:
+        logging.warning('Lazy loading not supported for GeoTIFF data.')
     ds = gdal.Open(input_file)
     proj = ds.GetProjection()
     trans = ds.GetGeoTransform()
@@ -292,8 +306,6 @@ def open_netcdf(input_file, lazy=True, load_glt=False, load_loc=False):
         return open_airborne_obs(input_file, lazy=lazy, load_glt=load_glt, load_loc=load_loc)
     elif 'ang' in input_file.lower()  and 'rfl' in input_file.lower():
         return open_airborne_rfl(input_file, lazy=lazy)
-    elif 'AV3' in input_file and 'OBS' in input_file:
-        return open_airborne_obs(input_file, lazy=lazy, load_glt=load_glt)
     else:
         raise ValueError(f'Unknown file type for {input_file}')
 
@@ -419,8 +431,10 @@ def open_airborne_obs(input_file, lazy=True, load_glt=False, load_loc=False):
     obs_names = list(ds['observation_parameters'].variables.keys())
 
     nodata_value = float(ds['observation_parameters'][obs_names[0]]._FillValue)
+    glt = None
     if load_glt:
         glt = np.stack([ds['geolocation_lookup_table']['sample'][:],ds['geolocation_lookup_table']['line'][:]],axis=-1)
+    loc = None
     if load_loc:
         loc = np.stack([ds['lon'][:],ds['lat'][:]],axis=-1)
 
@@ -429,16 +443,9 @@ def open_airborne_obs(input_file, lazy=True, load_glt=False, load_loc=False):
         logging.warning("Lazy loading not supported for observation data.")
     obs = np.stack([ds['observation_parameters'][on] for on in obs_names], axis=-1)
     
-    meta = GenericGeoMetadata(obs_names, trans, proj, glt=None, pre_orthod=True, nodata_value=nodata_value)
+    meta = GenericGeoMetadata(obs_names, trans, proj, glt=glt, pre_orthod=True, nodata_value=nodata_value, loc=loc)
 
-    if load_glt and load_loc:
-        return meta, obs, glt, loc
-    elif load_glt:
-        return meta, obs, glt
-    elif load_loc:
-        return meta, obs, loc
-    else:
-        return meta, obs
+    return meta, obs
 
 
 def get_extent_from_obs(input_file, get_resolution=False):
@@ -511,11 +518,11 @@ def create_envi_file(output_file, data_shape, meta, dtype='float32'):
     header = envi.read_envi_header(envi_header(output_file))
 
     if 'wl' in meta.__dict__ and meta.wl is not None:
-        header['wavelength'] = '{' + ', '.join(map(str, meta.wl)) + '}'
+        header['wavelength'] = '{ ' + ', '.join(map(str, meta.wl)) + ' }'
     if 'fwhm' in meta.__dict__ and meta.fwhm is not None:
-        header['fwhm'] = '{' + ', '.join(map(str, meta.fwhm)) + '}'
+        header['fwhm'] = '{ ' + ', '.join(map(str, meta.fwhm)) + ' }'
     if 'band_names' in meta.__dict__ and meta.band_names is not None:
-        header['band names'] = '{' + ', '.join(meta.band_names) + '}'
+        header['band names'] = '{ ' + ', '.join(meta.band_names) + ' }'
 
     header['data ignore value'] = str(meta.nodata_value)
 
