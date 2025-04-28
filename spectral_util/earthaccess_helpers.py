@@ -25,7 +25,7 @@ def find_download_and_combine(output_folder,
                               search_only = False):
     '''Find, download, and combine into VRTs all matching granules and store in OUTPUT_FOLDER
 
-    Rceommended usage: start with --search_only to review FIDs before downloading
+    Recommended usage: start with --search_only to review FIDs before downloading
     
     Search a DAAC using Earthaccess to find granules matching temporal and bounding_box. Download all the L1B and L2B products for
     each granule (except the full radiance as it takes too long and we don't need it generally for GHG analysis). Then, for each line,
