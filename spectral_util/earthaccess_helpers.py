@@ -106,15 +106,16 @@ def join_AV3_scenes_as_VRT_pixel_time_only(fid, storage_location, output_locatio
         d_obs_ort = spec_io.ortho_data(d_obs[:,:,0], m_obs.glt)
 
         # Save the orthoed times to tif so we can make a vrt below
-        driver = gdal.GetDriverByName('GTiff')
-        outDataset = driver.Create(out_tif, d_obs_ort.shape[1], d_obs_ort.shape[0], 1,
-                                   gdal.GDT_Float32, options = ['PROFILE=GeoTIFF'])
-        outDataset.GetRasterBand(1).WriteArray(d_obs_ort[:,:])
-        outDataset.GetRasterBand(1).SetNoDataValue(-9999)
-        outDataset.SetProjection(m_obs.projection)
-        outDataset.SetGeoTransform(m_obs.geotransform)
-        outDataset.FlushCache() # saves to disk!!
-        outDataset = None
+        write_geotiff(d_obs_ort, m_obs, out_tif)
+        #driver = gdal.GetDriverByName('GTiff')
+        #outDataset = driver.Create(out_tif, d_obs_ort.shape[1], d_obs_ort.shape[0], 1,
+        #                           gdal.GDT_Float32, options = ['PROFILE=GeoTIFF'])
+        #outDataset.GetRasterBand(1).WriteArray(d_obs_ort[:,:])
+        #outDataset.GetRasterBand(1).SetNoDataValue(-9999)
+        #outDataset.SetProjection(m_obs.projection)
+        #outDataset.SetGeoTransform(m_obs.geotransform)
+        #outDataset.FlushCache() # saves to disk!!
+        #outDataset = None
 
         j['OBS_ORT_times_only'] = out_tif
         json.dump(j, open(os.path.join(folder, 'data_files.json'),'w'), indent = 4)
@@ -182,24 +183,25 @@ def join_AV3_scenes_as_VRT(fid, granule_storage_location, output_location,
 
             # Make orthoed tif
             rdn_ort_tif_filename = '.'.join(rdn_filename.strip().split('.')[:-1]) + '_ORT.tif'
-            driver = gdal.GetDriverByName('GTiff')
-            outDataset = driver.Create(rdn_ort_tif_filename, 
-                                       rgb_data.shape[1], rgb_data.shape[0], rgb_data.shape[2],
-                                       gdal.GDT_Float32, options = ['COMPRESS=LZW'])
-            # This commented out part doesn't work, you have to put the numbers in by hand!
-            #for i in np.arange(rgb_data.shape[-1]):
-            #    outDataset.GetRasterBand(i+1).WriteArray(rgb_data[:,:,i])
-            #    outDataset.GetRasterBand(i+1).SetNoDataValue(-9999)
-            outDataset.GetRasterBand(1).WriteArray(rgb_data[:,:,0])
-            outDataset.GetRasterBand(1).SetNoDataValue(-9999)
-            outDataset.GetRasterBand(2).WriteArray(rgb_data[:,:,1])
-            outDataset.GetRasterBand(2).SetNoDataValue(-9999)
-            outDataset.GetRasterBand(3).WriteArray(rgb_data[:,:,2])
-            outDataset.GetRasterBand(3).SetNoDataValue(-9999)
-            outDataset.SetProjection(m_obs.projection)
-            outDataset.SetGeoTransform(m_obs.geotransform)
-            outDataset.FlushCache() ##saves to disk!!
-            outDataset = None
+            write_geotiff(rgb_data, m_obs, rdn_ort_tif_filename)
+            #driver = gdal.GetDriverByName('GTiff')
+            #outDataset = driver.Create(rdn_ort_tif_filename, 
+            #                           rgb_data.shape[1], rgb_data.shape[0], rgb_data.shape[2],
+            #                           gdal.GDT_Float32, options = ['COMPRESS=LZW'])
+            ## This commented out part doesn't work, you have to put the numbers in by hand!
+            ##for i in np.arange(rgb_data.shape[-1]):
+            ##    outDataset.GetRasterBand(i+1).WriteArray(rgb_data[:,:,i])
+            ##    outDataset.GetRasterBand(i+1).SetNoDataValue(-9999)
+            #outDataset.GetRasterBand(1).WriteArray(rgb_data[:,:,0])
+            #outDataset.GetRasterBand(1).SetNoDataValue(-9999)
+            #outDataset.GetRasterBand(2).WriteArray(rgb_data[:,:,1])
+            #outDataset.GetRasterBand(2).SetNoDataValue(-9999)
+            #outDataset.GetRasterBand(3).WriteArray(rgb_data[:,:,2])
+            #outDataset.GetRasterBand(3).SetNoDataValue(-9999)
+            #outDataset.SetProjection(m_obs.projection)
+            #outDataset.SetGeoTransform(m_obs.geotransform)
+            #outDataset.FlushCache() ##saves to disk!!
+            #outDataset = None
 
             j['RDN_QL_ORT'] = rdn_ort_tif_filename
             json.dump(j, open(os.path.join(folder, 'data_files.json'),'w'), indent = 4)
@@ -211,6 +213,33 @@ def join_AV3_scenes_as_VRT(fid, granule_storage_location, output_location,
         my_vrt = None
     
     return fid_with_scene_numbers
+
+def write_geotiff(data, meta, output_filename):
+    # This commented out part doesn't work, you have to put the numbers in by hand!
+    #for i in np.arange(data.shape[-1]):
+    write_data = data
+    if len(write_data.shape) == 2:
+        write_data = data.copy()[:,:,None]
+
+    driver = gdal.GetDriverByName('GTiff')
+    outDataset = driver.Create(output_filename, 
+                               write_data.shape[1], write_data.shape[0], write_data.shape[2],
+                               gdal.GDT_Float32, options = ['COMPRESS=LZW'])
+    
+
+    for i in range(write_data.shape[-1]):
+        outDataset.GetRasterBand(i+1).WriteArray(write_data[:,:,i])
+        outDataset.GetRasterBand(i+1).SetNoDataValue(-9999)
+    #outDataset.GetRasterBand(1).WriteArray(rgb_data[:,:,0])
+    #outDataset.GetRasterBand(1).SetNoDataValue(-9999)
+    #outDataset.GetRasterBand(2).WriteArray(rgb_data[:,:,1])
+    #outDataset.GetRasterBand(2).SetNoDataValue(-9999)
+    #outDataset.GetRasterBand(3).WriteArray(rgb_data[:,:,2])
+    #outDataset.GetRasterBand(3).SetNoDataValue(-9999)
+    outDataset.SetProjection(meta.projection)
+    outDataset.SetGeoTransform(meta.geotransform)
+    outDataset.FlushCache() ##saves to disk!!
+    outDataset = None
     
 def download_an_AV3_granule(rdn_granule, ghg_granule, storage_location, overwrite = False):
     name = ghg_granule['meta']['native-id']
