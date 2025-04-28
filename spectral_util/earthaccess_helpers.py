@@ -66,12 +66,14 @@ def find_download_and_combine(output_folder,
             raise ValueError(f'The output_folder {output_folder} already exists.')
     else:
         os.mkdir(output_folder)
-    if not os.path.exists(output_folder + '/granules'):
-        os.mkdir(output_folder + '/granules')
+    
+    granule_path = os.path.join(output_folder, 'granules')
+    if not os.path.exists(granule_path):
+        os.mkdir(granule_path)
 
     for i, (efid, rd, gh) in enumerate(zip(earthaccess_fids, r_rdn, r_ghg)):
         print(f'Downloading {efid}, #{i+1} of {len(earthaccess_fids)}')
-        download_an_AV3_granule(rd, gh, output_folder + '/granules/', overwrite = False)
+        download_an_AV3_granule(rd, gh, granule_path, overwrite = False)
     
     # Get all FIDs, combining all scene IDs into a single FID
     fids = sorted(list(set([x.split('_')[0] for x in earthaccess_fids]))) # Ex: AV320241008t193024
@@ -79,26 +81,26 @@ def find_download_and_combine(output_folder,
     # Make vrt files that combine each scene in a pass into one vrt file
     fids_with_scene_numbers = [] # Ex: AV320231008t145024_000_001
     for fid in fids:
-        fid_with_scene_numbers = join_AV3_scenes_as_VRT(fid, output_folder + '/granules/', output_folder + '/')
+        fid_with_scene_numbers = join_AV3_scenes_as_VRT(fid, granule_path, output_folder)
         fids_with_scene_numbers.append(fid_with_scene_numbers)
-        join_AV3_scenes_as_VRT_pixel_time_only(fid, output_folder + '/granules/', output_folder + '/')
+        join_AV3_scenes_as_VRT_pixel_time_only(fid, granule_path, output_folder)
     
     # Make symlinks to the granules folder in the symlinks_folder
     if symlinks_folder is not None:
-        folders = glob.glob(output_folder + '/granules/*')
+        folders = glob.glob(granule_path)
         for folder in folders:
-            dst = f'{symlinks_folder}/{folder.split("/")[-1]}'
+            dst = os.path.join(symlinks_folder, os.path.split(folder)[-1])
             os.symlink(folder, dst)
 
 def join_AV3_scenes_as_VRT_pixel_time_only(fid, storage_location, output_location):
-    folders = glob.glob(storage_location + f'/{fid}_*')
+    folders = glob.glob(os.path.join(storage_location, f'{fid}_*'))
     if len(folders) == 0:
-        raise ValueError(f'There are no folders matching ' + storage_location + f'/fid_*')
+        raise ValueError(f'There are no folders matching ' + os.path.join(storage_location, f'fid_*'))
     files = []
     for folder in folders:
-        j = json.load(open(folder + '/data_files.json','r'))
+        j = json.load(open(os.path.join(folder, 'data_files.json'),'r'))
         obs_filename = j[f'OBS']
-        out_tif = folder + '/' + obs_filename.split('/')[-1].split('.')[0] + '_times_only.tif'
+        out_tif = os.path.join(folder, os.path.split(obs_filename)[-1].split('.')[0] + '_times_only.tif')
 
         m_obs, d_obs = spec_io.load_data(obs_filename, load_glt = True, lazy = False)
         d_obs_ort = spec_io.ortho_data(d_obs[:,:,0], m_obs.glt)
@@ -115,18 +117,18 @@ def join_AV3_scenes_as_VRT_pixel_time_only(fid, storage_location, output_locatio
         outDataset = None
 
         j['OBS_ORT_times_only'] = out_tif
-        json.dump(j, open(folder + '/data_files.json','w'), indent = 4)
+        json.dump(j, open(os.path.join(folder, 'data_files.json'),'w'), indent = 4)
 
         files.append(out_tif)
 
     # Create folder and vrt name like: AV320231008t145024_000_001 
-    scene_numbers = [x.strip().split('/')[-1].split('_')[1] for x in files]
+    scene_numbers = [os.path.split(x.strip())[-1].split('_')[1] for x in files]
     scene_numbers = sorted(scene_numbers)
-    output_folder = f'{output_location}/{fid}_{scene_numbers[0]}_{scene_numbers[-1]}/'
+    output_folder = os.path.join(output_location, f'{fid}_{scene_numbers[0]}_{scene_numbers[-1]}')
     if not os.path.exists(output_folder):
         os.mkdir(output_folder)
 
-    vrt_filename = f'{output_folder}/{fid}_{scene_numbers[0]}_{scene_numbers[-1]}_obs_times.vrt'
+    vrt_filename = os.path.join(output_folder, f'{fid}_{scene_numbers[0]}_{scene_numbers[-1]}_obs_times.vrt')
     my_vrt = gdal.BuildVRT(vrt_filename, files)
     my_vrt = None
 
@@ -142,26 +144,26 @@ def join_AV3_scenes_as_VRT(fid, granule_storage_location, output_location,
     For reference, good channel indices for rdn rgb are correspond to 641, 552, 462 nm in AV3, or
     rgb_channel_idx = [34,22,10]
     '''
-    folders = glob.glob(granule_storage_location + f'/{fid}_*')
+    folders = glob.glob(os.path.join(granule_storage_location, f'{fid}_*'))
     if len(folders) == 0:
-        raise ValueError(f'There are no folders matching ' + granule_storage_location + f'/fid_*')
+        raise ValueError(f'There are no folders matching ' + os.path.join(granule_storage_location, f'fid_*'))
     
     for tag in tags_to_join:
         files = []
         for folder in folders:
-            fs = json.load(open(folder + '/data_files.json','r'))[f'{tag}']
+            fs = json.load(open(os.path.join(folder, 'data_files.json','r')))[f'{tag}']
             files.append(fs)
 
-        scene_numbers = [x.strip().split('/')[-1].split('_')[1] for x in files]
+        scene_numbers = [os.path.split(x)[-1].split('_')[1] for x in files]
         scene_numbers = sorted(scene_numbers)
 
-        output_folder = f'{output_location}/{fid}_{scene_numbers[0]}_{scene_numbers[-1]}/'
+        output_folder = os.path.join(output_location, f'{fid}_{scene_numbers[0]}_{scene_numbers[-1]}')
         if not os.path.exists(output_folder):
             os.mkdir(output_folder)
 
         # Make output name be the fid plume the first and last scene included in the vrt plus the tag
         fid_with_scene_numbers = f'{fid}_{scene_numbers[0]}_{scene_numbers[-1]}'
-        vrt_filename = f'{output_folder}/{fid_with_scene_numbers}_{tag.split(".")[0]}.vrt'
+        vrt_filename = os.path.join(output_folder, f'{fid_with_scene_numbers}_{tag.split(".")[0]}.vrt')
         my_vrt = gdal.BuildVRT(vrt_filename, files)
         my_vrt = None
 
@@ -170,7 +172,7 @@ def join_AV3_scenes_as_VRT(fid, granule_storage_location, output_location,
         rdn_ort_tif_filenames = []
         for folder in folders:
 
-            j = json.load(open(folder + '/data_files.json','r'))
+            j = json.load(open(os.path.join(folder, 'data_files.json'),'r'))
             rdn_filename = j['RDN_QL']
             obs_filename = j['OBS']
 
@@ -200,11 +202,11 @@ def join_AV3_scenes_as_VRT(fid, granule_storage_location, output_location,
             outDataset = None
 
             j['RDN_QL_ORT'] = rdn_ort_tif_filename
-            json.dump(j, open(folder + '/data_files.json','w'), indent = 4)
+            json.dump(j, open(os.path.join(folder, 'data_files.json'),'w'), indent = 4)
 
             rdn_ort_tif_filenames.append(rdn_ort_tif_filename)
         
-        vrt_filename = f'{output_folder}/{fid}_{scene_numbers[0]}_{scene_numbers[-1]}_RDN_ORT.vrt'
+        vrt_filename = os.path.join(output_folder, f'{fid}_{scene_numbers[0]}_{scene_numbers[-1]}_RDN_ORT.vrt')
         my_vrt = gdal.BuildVRT(vrt_filename, rdn_ort_tif_filenames)
         my_vrt = None
     
@@ -212,7 +214,7 @@ def join_AV3_scenes_as_VRT(fid, granule_storage_location, output_location,
     
 def download_an_AV3_granule(rdn_granule, ghg_granule, storage_location, overwrite = False):
     name = ghg_granule['meta']['native-id']
-    output_folder = storage_location + '/' + name
+    output_folder = os.path.join(storage_location, name)
     download = False
     if not os.path.exists(output_folder):
         download = True
@@ -240,7 +242,7 @@ def download_from_urls(urls, outpath):
     for url in urls:
         granule_asset_id = url.split('/')[-1]
         # Define Local Filepath
-        fp = f'{outpath}/{granule_asset_id}'
+        fp = os.path.join(outpath, granule_asset_id)
         # Download the Granule Asset if it doesn't exist
         if not os.path.isfile(fp):
             with fs.get(url,stream=True) as src:
@@ -273,7 +275,7 @@ def make_files_list_from_urls_or_glob(urls, tags, outpath):
             pdb.set_trace()
         files_list[tag] = os.path.join(outpath, f'{urls_cut[ind]}')
     
-    json.dump(files_list, open(outpath + '/data_files.json', 'w'), indent = 4)
+    json.dump(files_list, open(os.path.join(outpath, 'data_files.json'), 'w'), indent = 4)
     return
 
 if __name__ == '__main__':
