@@ -109,6 +109,8 @@ def load_data(input_file, lazy=True, load_glt=False, load_loc=False):
             - Metadata: An object containing the appropriate metadata
             - numpy.ndarray or netCDF4.Variable: The data, either as a lazy-loaded variable or a fully loaded numpy array.
     """
+    if not os.path.exists(input_file):
+        raise FileNotFoundError(f'{input_file} not found.')
     if input_file.endswith(('.hdr', '.dat', '.img')) or '.' not in os.path.basename(input_file):
         return open_envi(input_file, lazy=lazy)
     elif input_file.endswith('.nc'):
