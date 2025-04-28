@@ -109,7 +109,7 @@ def join_AV3_scenes_as_VRT_pixel_time_only(fid, storage_location, output_locatio
         driver = gdal.GetDriverByName('GTiff')
         outDataset = driver.Create(out_tif, d_obs_ort.shape[1], d_obs_ort.shape[0], 1,
                                    gdal.GDT_Float32, options = ['PROFILE=GeoTIFF'])
-        outDataset.GetRasterBand(1).WriteArray(d_obs_ort[:,:,0])
+        outDataset.GetRasterBand(1).WriteArray(d_obs_ort[:,:])
         outDataset.GetRasterBand(1).SetNoDataValue(-9999)
         outDataset.SetProjection(m_obs.projection)
         outDataset.SetGeoTransform(m_obs.geotransform)
@@ -151,7 +151,7 @@ def join_AV3_scenes_as_VRT(fid, granule_storage_location, output_location,
     for tag in tags_to_join:
         files = []
         for folder in folders:
-            fs = json.load(open(os.path.join(folder, 'data_files.json','r')))[f'{tag}']
+            fs = json.load(open(os.path.join(folder, 'data_files.json'),'r'))[f'{tag}']
             files.append(fs)
 
         scene_numbers = [os.path.split(x)[-1].split('_')[1] for x in files]
