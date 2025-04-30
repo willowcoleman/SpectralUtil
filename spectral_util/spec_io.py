@@ -111,11 +111,13 @@ def load_data(input_file, lazy=True, load_glt=False, load_loc=False):
     """
     if not os.path.exists(input_file):
         raise FileNotFoundError(f'{input_file} not found.')
-    if input_file.endswith(('.hdr', '.dat', '.img')) or '.' not in os.path.basename(input_file):
+
+    input_filename = os.path.basename(input_file)
+    if input_filename.endswith(('.hdr', '.dat', '.img')) or '.' not in input_filename:
         return open_envi(input_file, lazy=lazy)
-    elif input_file.endswith('.nc'):
+    elif input_filename.endswith('.nc'):
         return open_netcdf(input_file, lazy=lazy, load_glt=load_glt, load_loc=load_loc)
-    elif input_file.endswith('.tif') or input_file.endswith('.vrt'):
+    elif input_filename.endswith('.tif') or input_filename.endswith('.vrt'):
         return open_tif(input_file, lazy=lazy)
     else:
         raise ValueError(f'Unknown file type for {input_file}')
