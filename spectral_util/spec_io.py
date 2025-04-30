@@ -401,7 +401,7 @@ def open_airborne_rdn(input_file, lazy=True):
         # need to consider some clever solutions.  In the meantime, this works, but is expensive
         rdn = np.transpose(ds['radiance']['radiance'], (1,2,0))
     else:
-        rdn = np.transponse(ds['radiance']['radiance'][:], (1,2,0))
+        rdn = np.transpose(ds['radiance']['radiance'][:], (1,2,0))
     
     meta = SpectralMetadata(wl, fwhm, trans, proj, glt=None, pre_orthod=True, nodata_value=nodata_value)
 
