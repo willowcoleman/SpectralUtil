@@ -111,11 +111,13 @@ def load_data(input_file, lazy=True, load_glt=False, load_loc=False):
     """
     if not os.path.exists(input_file):
         raise FileNotFoundError(f'{input_file} not found.')
-    if input_file.endswith(('.hdr', '.dat', '.img')) or '.' not in os.path.basename(input_file):
+
+    input_filename = os.path.basename(input_file)
+    if input_filename.endswith(('.hdr', '.dat', '.img')) or '.' not in input_filename:
         return open_envi(input_file, lazy=lazy)
-    elif input_file.endswith('.nc'):
+    elif input_filename.endswith('.nc'):
         return open_netcdf(input_file, lazy=lazy, load_glt=load_glt, load_loc=load_loc)
-    elif input_file.endswith('.tif') or input_file.endswith('.vrt'):
+    elif input_filename.endswith('.tif') or input_filename.endswith('.vrt'):
         return open_tif(input_file, lazy=lazy)
     else:
         raise ValueError(f'Unknown file type for {input_file}')
@@ -298,15 +300,16 @@ def open_netcdf(input_file, lazy=True, load_glt=False, load_loc=False):
             - Metadata: An object containing the appropriate metadata
             - numpy.ndarray or netCDF4.Variable: The data, either as a lazy-loaded variable or a fully loaded numpy array.
     """
-    if 'EMIT' in input_file and 'RAD' in input_file:
+    input_filename = os.path.basename(input_file)
+    if 'EMIT' in input_filename and 'RAD' in input_filename:
         return open_emit_rdn(input_file, lazy=lazy, load_glt=load_glt)
-    elif 'AV3' in input_file and 'RFL' in input_file:
+    elif 'AV3' in input_filename and 'RFL' in input_filename:
         return open_airborne_rfl(input_file, lazy=lazy)
-    elif 'AV3' in input_file and 'RDN' in input_file:
+    elif 'AV3' in input_filename and 'RDN' in input_filename:
         return open_airborne_rdn(input_file, lazy=lazy)
-    elif ('av3' in input_file.lower() or 'ang' in input_file.lower()) and 'OBS' in input_file:
+    elif ('av3' in input_filename.lower() or 'ang' in input_filename.lower()) and 'OBS' in input_filename:
         return open_airborne_obs(input_file, lazy=lazy, load_glt=load_glt, load_loc=load_loc)
-    elif 'ang' in input_file.lower()  and 'rfl' in input_file.lower():
+    elif 'ang' in input_filename.lower()  and 'rfl' in input_filename.lower():
         return open_airborne_rfl(input_file, lazy=lazy)
     else:
         raise ValueError(f'Unknown file type for {input_file}')
