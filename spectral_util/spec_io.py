@@ -536,7 +536,7 @@ def write_bil_chunk(dat, outfile, line, shape, dtype = 'float32'):
     outfile.close()
 
 
-def create_envi_file(output_file, data_shape, meta, dtype='float32'):
+def create_envi_file(output_file, data_shape, meta, dtype=np.dtype(np.float32)):
     """
     Creates an ENVI file with the given data and metadata.
 
