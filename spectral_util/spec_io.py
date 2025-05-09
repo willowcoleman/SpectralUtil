@@ -243,17 +243,21 @@ def open_envi(input_file, lazy=True):
     else:
         proj = None
     if 'map info' in imeta:
-        map_info = imeta['map info'].split(',')
+        map_info = imeta['map info'].split(',') if type(imeta['map info']) == str else imeta['map info']
         trans = [float(map_info[3]), float(map_info[5]), 0, float(map_info[4]), 0, -float(map_info[6])]
     else:
         map_info, trans = None, None
-
+    
+    glt = None
+    if 'glt' in os.path.basename(input_file).lower():
+        glt = ds.open_memmap(interleave='bip').copy()
+    
     if lazy:
         rfl = ds.open_memmap(interleave='bip', writable=False)
     else:
         rfl = ds.open_memmap(interleave='bip').copy()
 
-    meta = SpectralMetadata(wl, fwhm, nodata_value=nodata_value, geotransform=trans, projection=proj)
+    meta = SpectralMetadata(wl, fwhm, nodata_value=nodata_value, geotransform=trans, projection=proj, glt=glt)
     return meta, rfl
     
 
