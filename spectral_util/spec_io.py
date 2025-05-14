@@ -480,14 +480,18 @@ def get_extent_from_obs(input_file, get_resolution=False):
     else:
         return np.min(lon), np.max(lat), np.max(lon), np.min(lat)
 
-def write_envi_file(dat, meta, output_filename):
+def write_envi_file(dat, meta, output_filename, interleave = 'BIL'):
     """
     Write an ENVI file
     Args:
         dat: data to write: nx, ny, nbands
         meta (SpectralMetadata): The spectral metadata contianing wavelengths and FWHM
         output_filename: Output file name (no extension)
+        interleave: string to indicate interleave method
     """
+    if interleave.lower() != 'bil':
+        raise NotImplementedError(f'Print interleave mode {interleave} not yet supported.')
+
     create_envi_file(output_filename, dat.shape, meta, dtype = dat.dtype)
     write_bil_chunk(dat.transpose([0,2,1]), output_filename, 0, (dat.shape[0], dat.shape[2], dat.shape[1]))
 
