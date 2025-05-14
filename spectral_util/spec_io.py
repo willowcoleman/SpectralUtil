@@ -239,7 +239,8 @@ def open_envi(input_file, lazy=True):
         nodata_value = -9999 # set default
 
     if 'coordinate system string' in imeta:
-        proj = imeta['coordinate system string']
+        css = imeta['coordinate system string']
+        proj = css if type(css) == str else ','.join(css)
     else:
         proj = None
     if 'map info' in imeta:
