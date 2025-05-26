@@ -148,7 +148,7 @@ def find_subgrid_locations(y_grid: np.array, x_grid: np.array, y_subgrid: np.arr
 
     # Interpolated values are negative
     if max_distance is not None:
-        mask = distances < max_distance
+        mask = distances.reshape(y_grid_minor.shape) > max_distance
         col_indices[mask] *= -1
         row_indices[mask] *= -1
     else:
@@ -232,9 +232,10 @@ def stack_glts(glt_files, obs_file_lists, output_glt_file, output_file_list):
 @click.option('--criteria_band', type=int, default=None)
 @click.option('--criteria_mode', type=click.Choice(["min","max"]), default="min")
 @click.option('--n_cores', type=int, default=1)
+@click.option('--max_distance', type=float, default=None)
 @click.option('--log_file', type=str, default=None)
 @click.option('--log_level', type=click.Choice(["DEBUG","INFO","WARN","ERROR"]), default="INFO")
-def build_obs_nc(output_file, input_file_list, ignore_file_list, x_resolution, y_resolution, target_extent_ul_lr, output_epsg, criteria_band, criteria_mode, n_cores, log_file, log_level):
+def build_obs_nc(output_file, input_file_list, ignore_file_list, x_resolution, y_resolution, target_extent_ul_lr, output_epsg, criteria_band, criteria_mode, n_cores, max_distance, log_file, log_level):
     """
     Build a mosaic from the input file.
 
@@ -249,6 +250,7 @@ def build_obs_nc(output_file, input_file_list, ignore_file_list, x_resolution, y
         criteria_band (int): Band to use for the criteria.
         criteria_mode (str): Mode to use for the criteria.
         n_cores (int): Number of cores to use for processing.
+        max_distance (float): Maximum distance, in output CRS units, to solve for
         log_file (str): Path to the log file.
         log_level (str): Logging verbosity.
     """
@@ -332,7 +334,7 @@ def build_obs_nc(output_file, input_file_list, ignore_file_list, x_resolution, y
         local_meta, obs = spec_io.load_data(file.strip(), lazy=True, load_glt=False, load_loc=True)
         loc = np.stack(proj(local_meta.loc[...,0],local_meta.loc[...,1]),axis=-1)
 
-        sub_glt, sub_glt_insert_idx = find_subgrid_locations(y_grid, x_grid, loc[...,1], loc[...,0], n_workers=n_cores)  
+        sub_glt, sub_glt_insert_idx = find_subgrid_locations(y_grid, x_grid, loc[...,1], loc[...,0], n_workers=n_cores, max_distance=max_distance)  
 
         if sub_glt is None:
             logging.debug(f'{file} OOB')
@@ -377,7 +379,8 @@ def build_obs_nc(output_file, input_file_list, ignore_file_list, x_resolution, y
 @click.option('--nodata_value', type=float, default=-9999)
 @click.option('--bands', default=None, type=int, multiple=True)
 @click.option('--output_format', default='tif', type=str, help="Output format")
-def apply_glt(glt_file, raw_files, output_file, nodata_value, bands, output_format):
+@click.option('--glt_nodata_value', default=None, type=int, help="GLT Nodata Value")
+def apply_glt(glt_file, raw_files, output_file, nodata_value, bands, output_format, glt_nodata_value):
     """
     Apply the GLT to the input files.
 
@@ -387,8 +390,11 @@ def apply_glt(glt_file, raw_files, output_file, nodata_value, bands, output_form
         output_file (str): Path to the output file.
         nodata_value (float): Nodata value for the output.
         bands (int): Bands to use for the output (None = all)
+        glt_nodata_value (int): Override the nodata value in the GLT file; used to support legacy files only, generally should be ignored
     """
     glt_meta, glt = spec_io.load_data(glt_file, lazy=False)
+    if glt_nodata_value is not None:
+        glt_meta.nodata_value = glt_nodata_value
     glt = glt.astype(np.int32) # make sure we're not in legacy uint format
     glt_nonblank = glt[...,0] != glt_meta.nodata_value
     glt[...,:2] = np.abs(glt[...,:2])
@@ -399,6 +405,8 @@ def apply_glt(glt_file, raw_files, output_file, nodata_value, bands, output_form
         input_files = open(raw_files, 'r').readlines()
     else:
         input_files = [raw_files]
+        if glt.shape[-1] == 2:
+            glt = np.append(glt, np.zeros((glt.shape[0],glt.shape[1],1),dtype=np.int32),axis=2)
 
     outdata = None
     for _file, file in enumerate(tqdm(input_files, ncols=80, desc="Apply GLT, File:", unit="files")):
@@ -416,6 +424,7 @@ def apply_glt(glt_file, raw_files, output_file, nodata_value, bands, output_form
             outdata[valid_glt, :] = dat[glt[valid_glt, 1], glt[valid_glt, 0], :]
 
     if outdata is not None:
+        logging.info(f'Writing: {output_file}')
         output_meta = deepcopy(meta)
         output_meta.projection = glt_meta.projection
         output_meta.geotransform = glt_meta.geotransform
@@ -424,6 +433,10 @@ def apply_glt(glt_file, raw_files, output_file, nodata_value, bands, output_form
         elif output_format == 'envi':
             spec_io.create_envi_file(output_file, outdata.shape, output_meta, outdata.dtype)
             spec_io.write_bil_chunk(outdata.transpose((0,2,1)), output_file, 0, (glt.shape[0], outdata.shape[-1], glt.shape[1]) )
+        else:
+            logging.error('Unsupported output file time')
+    else:
+        logging.info('No data found; skipping output file write')
 
 
 @click.group()
