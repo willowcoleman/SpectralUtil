@@ -6,12 +6,103 @@ from scipy.signal import convolve2d
 
 import time
 import spec_io
-from osgeo import osr
+from osgeo import osr, gdal, ogr 
 import pyproj
 import logging
 from tqdm import tqdm
 from copy import deepcopy
 osr.UseExceptions()
+
+@click.command()
+@click.argument('ortho_file', type=click.Path(exists=True))
+@click.argument('json_file', type=click.Path(exists=True))
+@click.argument('urban_data', type=click.Path(exists=True))
+@click.argument('output_file', type=click.Path())
+@click.option('--output_res', type=float, default = 0.000542232520256) ## default to EMIT res
+@click.option('--nodata_value', type=float, default=0)
+def urban_mask(ortho_file, json_file, urban_data, output_file, output_res, nodata_value):
+
+    # Get SRS info from orthoed file 
+    ds = gdal.Open(ortho_file)
+    wkt = ds.GetProjection()
+    ds = None
+
+    # Build warp options
+    warp_options = gdal.WarpOptions(
+        cutlineDSName=json_file,
+        cropToCutline=True,
+        dstNodata=nodata_value,
+        xRes=output_res,
+        yRes=-output_res,
+        dstSRS=wkt
+    )
+    gdal.Warp(destNameOrDestDS="clipped.tif", srcDSOrSrcDSTab=urban_data, options=warp_options)
+
+    # Generate geotiff mask of urban areas (50 in ESA worldcover)
+    ds = gdal.Open("clipped.tif") # temporary file 
+    band = ds.GetRasterBand(1)
+    array = band.ReadAsArray()
+    result = np.logical_and(array >= 0, array == 50).astype(np.uint8)
+
+    # Create output file with the same georeference and projection
+    driver = gdal.GetDriverByName("GTiff")
+    out_ds = driver.Create(output_file, ds.RasterXSize, ds.RasterYSize, 1, gdal.GDT_Byte)
+    out_ds.SetGeoTransform(ds.GetGeoTransform())
+    out_ds.SetProjection(ds.GetProjection())
+
+    # Write result and set NoData value
+    out_band = out_ds.GetRasterBand(1)
+    out_band.WriteArray(result)
+    out_band.SetNoDataValue(nodata_value)
+
+    os.remove("clipped.tif") # del temporary file 
+
+
+@click.command()
+@click.argument('json_file', type=click.Path(exists=True))
+@click.argument('coastal_data', type=click.Path(exists=True))
+@click.argument('output_file', type=click.Path(exists=True))
+@click.option('--output_res', type=float, default = 0.000542232520256) ## default to EMIT res
+def coastal_mask(json_file, coastal_data, output_file, output_res): 
+
+    # Clip large coastal shapefile to EMIT extent (too slow) 
+    gdal.VectorTranslate(
+        "temp.shp",                              # Output file
+        coastal_data,                            # Input file (coastal data)
+        options=gdal.VectorTranslateOptions(
+            format="ESRI Shapefile",
+            clipSrc=json_file                    # Clip to tile extent 
+        )
+    )
+
+    # Get extent from shapefile for new raster 
+    shp_ds = ogr.Open("temp.shp")
+    layer = shp_ds.GetLayer()   
+    minx, maxx, miny, maxy = layer.GetExtent()
+    x_res = int((maxx - minx) / output_res)
+    y_res = int((maxy - miny) / output_res)
+
+    # Create output raster
+    out_ds = gdal.GetDriverByName("GTiff").Create(output_file, x_res, y_res, 1, gdal.GDT_Byte)
+    out_ds.SetGeoTransform((minx, output_res, 0, maxy, 0, -output_res))
+    out_band = out_ds.GetRasterBand(1)
+    out_band.Fill(1)
+
+    # Set projection and rasterize 
+    srs = layer.GetSpatialRef()
+    if srs:
+        out_ds.SetProjection(srs.ExportToWkt())
+
+    gdal.RasterizeLayer(
+        out_ds,
+        [1],  # band index
+        layer,
+        burn_values=[0],
+        options=["INVERT=FALSE"]
+    )
+
+    os.remove("temp.shp") # del temporary file 
+    
 
 
 def remove_negatives(glt, clean_contiguous=False, clean_interpolated=False):
@@ -148,7 +239,7 @@ def find_subgrid_locations(y_grid: np.array, x_grid: np.array, y_subgrid: np.arr
 
     # Interpolated values are negative
     if max_distance is not None:
-        mask = distances < max_distance
+        mask = distances.reshape(y_grid_minor.shape) > max_distance
         col_indices[mask] *= -1
         row_indices[mask] *= -1
     else:
@@ -232,9 +323,10 @@ def stack_glts(glt_files, obs_file_lists, output_glt_file, output_file_list):
 @click.option('--criteria_band', type=int, default=None)
 @click.option('--criteria_mode', type=click.Choice(["min","max"]), default="min")
 @click.option('--n_cores', type=int, default=1)
+@click.option('--max_distance', type=float, default=None)
 @click.option('--log_file', type=str, default=None)
 @click.option('--log_level', type=click.Choice(["DEBUG","INFO","WARN","ERROR"]), default="INFO")
-def build_obs_nc(output_file, input_file_list, ignore_file_list, x_resolution, y_resolution, target_extent_ul_lr, output_epsg, criteria_band, criteria_mode, n_cores, log_file, log_level):
+def build_obs_nc(output_file, input_file_list, ignore_file_list, x_resolution, y_resolution, target_extent_ul_lr, output_epsg, criteria_band, criteria_mode, n_cores, max_distance, log_file, log_level):
     """
     Build a mosaic from the input file.
 
@@ -249,6 +341,7 @@ def build_obs_nc(output_file, input_file_list, ignore_file_list, x_resolution, y
         criteria_band (int): Band to use for the criteria.
         criteria_mode (str): Mode to use for the criteria.
         n_cores (int): Number of cores to use for processing.
+        max_distance (float): Maximum distance, in output CRS units, to solve for
         log_file (str): Path to the log file.
         log_level (str): Logging verbosity.
     """
@@ -332,7 +425,7 @@ def build_obs_nc(output_file, input_file_list, ignore_file_list, x_resolution, y
         local_meta, obs = spec_io.load_data(file.strip(), lazy=True, load_glt=False, load_loc=True)
         loc = np.stack(proj(local_meta.loc[...,0],local_meta.loc[...,1]),axis=-1)
 
-        sub_glt, sub_glt_insert_idx = find_subgrid_locations(y_grid, x_grid, loc[...,1], loc[...,0], n_workers=n_cores)  
+        sub_glt, sub_glt_insert_idx = find_subgrid_locations(y_grid, x_grid, loc[...,1], loc[...,0], n_workers=n_cores, max_distance=max_distance)  
 
         if sub_glt is None:
             logging.debug(f'{file} OOB')
@@ -377,7 +470,8 @@ def build_obs_nc(output_file, input_file_list, ignore_file_list, x_resolution, y
 @click.option('--nodata_value', type=float, default=-9999)
 @click.option('--bands', default=None, type=int, multiple=True)
 @click.option('--output_format', default='tif', type=str, help="Output format")
-def apply_glt(glt_file, raw_files, output_file, nodata_value, bands, output_format):
+@click.option('--glt_nodata_value', default=None, type=int, help="GLT Nodata Value")
+def apply_glt(glt_file, raw_files, output_file, nodata_value, bands, output_format, glt_nodata_value):
     """
     Apply the GLT to the input files.
 
@@ -387,8 +481,11 @@ def apply_glt(glt_file, raw_files, output_file, nodata_value, bands, output_form
         output_file (str): Path to the output file.
         nodata_value (float): Nodata value for the output.
         bands (int): Bands to use for the output (None = all)
+        glt_nodata_value (int): Override the nodata value in the GLT file; used to support legacy files only, generally should be ignored
     """
     glt_meta, glt = spec_io.load_data(glt_file, lazy=False)
+    if glt_nodata_value is not None:
+        glt_meta.nodata_value = glt_nodata_value
     glt = glt.astype(np.int32) # make sure we're not in legacy uint format
     glt_nonblank = glt[...,0] != glt_meta.nodata_value
     glt[...,:2] = np.abs(glt[...,:2])
@@ -399,6 +496,8 @@ def apply_glt(glt_file, raw_files, output_file, nodata_value, bands, output_form
         input_files = open(raw_files, 'r').readlines()
     else:
         input_files = [raw_files]
+        if glt.shape[-1] == 2:
+            glt = np.append(glt, np.zeros((glt.shape[0],glt.shape[1],1),dtype=np.int32),axis=2)
 
     outdata = None
     for _file, file in enumerate(tqdm(input_files, ncols=80, desc="Apply GLT, File:", unit="files")):
@@ -416,6 +515,7 @@ def apply_glt(glt_file, raw_files, output_file, nodata_value, bands, output_form
             outdata[valid_glt, :] = dat[glt[valid_glt, 1], glt[valid_glt, 0], :]
 
     if outdata is not None:
+        logging.info(f'Writing: {output_file}')
         output_meta = deepcopy(meta)
         output_meta.projection = glt_meta.projection
         output_meta.geotransform = glt_meta.geotransform
@@ -424,6 +524,10 @@ def apply_glt(glt_file, raw_files, output_file, nodata_value, bands, output_form
         elif output_format == 'envi':
             spec_io.create_envi_file(output_file, outdata.shape, output_meta, outdata.dtype)
             spec_io.write_bil_chunk(outdata.transpose((0,2,1)), output_file, 0, (glt.shape[0], outdata.shape[-1], glt.shape[1]) )
+        else:
+            logging.error('Unsupported output file time')
+    else:
+        logging.info('No data found; skipping output file write')
 
 
 @click.group()
@@ -434,6 +538,8 @@ def cli():
 cli.add_command(build_obs_nc)
 cli.add_command(apply_glt)
 cli.add_command(stack_glts)
+cli.add_command(urban_mask)
+cli.add_command(coastal_mask)
 
 
 if __name__ == '__main__':

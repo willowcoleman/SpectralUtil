@@ -187,6 +187,7 @@ cli.add_command(ndvi)
 cli.add_command(nbr)
 cli.add_command(rgb)
 cli.add_command(ndsi)
+cli.add_command(ndwi)
 
 
 if __name__ == '__main__':
