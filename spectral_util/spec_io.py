@@ -245,7 +245,11 @@ def open_envi(input_file, lazy=True):
         proj = None
     if 'map info' in imeta:
         map_info = imeta['map info'].split(',') if type(imeta['map info']) == str else imeta['map info']
-        trans = [float(map_info[3]), float(map_info[5]), 0, float(map_info[4]), 0, -float(map_info[6])]
+        rotation=0
+        for val in map_info:
+            if 'rotation=' in val:
+                rotation = float(val.replace('rotation=','').strip())
+        trans = [float(map_info[3]), float(map_info[5]), rotation, float(map_info[4]), rotation, -float(map_info[6])]
     else:
         map_info, trans = None, None
     
