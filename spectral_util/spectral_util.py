@@ -147,7 +147,8 @@ def rgb(input_file, output_file, ortho, red_wl, green_wl, blue_wl, stretch, scal
 @click.option('--swir_wl', default=1600, help='SWIR1 band wavelength [nm]')
 @click.option('--green_width', default=0, help='Red Green width [nm]; 0 = single wavelength')
 @click.option('--swir_width', default=0, help='SWIR1 band width [nm]; 0 = single wavelength')
-def ndsi(input_file, output_file, ortho, green_wl, swir_wl, green_width, swir_width):
+@click.option('--threshold', default=0.4, help='NDSI threshold, mask all pixels > threshold')
+def ndsi(input_file, output_file, ortho, green_wl, swir_wl, green_width, swir_width, threshold):
     """
     Calculate NDSI (normalized difference snow index). 
 
@@ -170,6 +171,9 @@ def ndsi(input_file, output_file, ortho, green_wl, swir_wl, green_width, swir_wi
     ndsi = ndsi.squeeze()
     ndsi[np.isfinite(ndsi) == False] = -9999
     ndsi = ndsi.reshape((ndsi.shape[0], ndsi.shape[1], 1))
+
+    ndsi[ndsi > threshold] = 1
+    ndsi[ndsi <= threshold] = 0   
 
     write_cog(output_file, ndsi, meta, ortho=ortho)
 
